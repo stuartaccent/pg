@@ -71,6 +71,7 @@ templ Index(services []string, current string, readOnly bool, err error) {
 							@tabButton("1")
 						</div>
 						<button type="button" class="btn btn-square btn-ghost btn-xs" aria-label="New query tab" hx-post="/tabs" hx-target="#panels" hx-swap="beforeend">+</button>
+						<button type="button" class="btn btn-ghost btn-xs ml-auto" onclick="closeAllTabs()">Close all</button>
 					</div>
 					<div id="panels" class="flex flex-1 min-h-0">
 						@tabPanel("1")

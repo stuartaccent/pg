@@ -102,12 +102,30 @@ function selectTab(id) {
 async function closeTab(id) {
 	if (views.size === 1) return;
 	if (views.get(id).state.doc.length > 0 && !(await ask("Close this tab and discard its SQL?"))) return;
+	await removeTab(id);
+	if (activeTab === id) selectTab([...views.keys()].at(-1));
+	saveTabs();
+}
+
+async function removeTab(id) {
 	await fetch(`/tabs/${id}`, { method: "DELETE" });
 	views.get(id).destroy();
 	views.delete(id);
 	document.querySelector(`[data-tab="${id}"]`).remove();
 	document.querySelector(`[data-tab-button="${id}"]`).remove();
-	if (activeTab === id) selectTab([...views.keys()].at(-1));
+}
+
+// There's always a tab, so the first one stays, emptied.
+async function closeAllTabs() {
+	const hasSQL = [...views.values()].some((view) => view.state.doc.length > 0);
+	if (hasSQL && !(await ask("Close all tabs and discard their SQL?"))) return;
+	const [kept, ...others] = views.keys();
+	await Promise.all(others.map(removeTab));
+	await fetch(`/tabs/${kept}`, { method: "DELETE" }); // ends its session, and any query running in it
+	setText(views.get(kept), "");
+	document.querySelector(`#results-${kept}`).replaceChildren();
+	document.querySelector(`#notice-${kept}`).replaceChildren();
+	selectTab(kept);
 	saveTabs();
 }
 
@@ -327,7 +345,7 @@ document.addEventListener("keydown", (event) => {
 	resize(bar, sizeOf(bar) + step);
 });
 
-Object.assign(window, { selectTab, closeTab, useSQL, useDefinition, resetTree, formatSQL, showHistory, renderHistory, copyCell });
+Object.assign(window, { selectTab, closeTab, closeAllTabs, useSQL, useDefinition, resetTree, formatSQL, showHistory, renderHistory, copyCell });
 
 document.addEventListener("click", (event) => {
 	const td = event.target.closest?.(".results tr[data-row] td");
