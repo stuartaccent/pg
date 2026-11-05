@@ -2,12 +2,13 @@
 // by `npm run build`.
 import { basicSetup, EditorView } from "codemirror";
 import { PostgreSQL, sql } from "@codemirror/lang-sql";
-import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
+import { HighlightStyle, syntaxHighlighting, syntaxTree } from "@codemirror/language";
 import { Compartment, Prec } from "@codemirror/state";
 import { keymap, placeholder } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import { formatDialect, postgresql } from "sql-formatter";
 import { writesEveryRow } from "./risky.mjs";
+import { tablesAt } from "./tables.mjs";
 
 const views = new Map(); // tab id to its editor
 const language = new Compartment();
@@ -17,6 +18,28 @@ const MAX_HISTORY = 200;
 const MIN_PANE = 80; // the smallest a dragged pane gets; what's beside it keeps twice this, as it holds the buttons too
 
 const sqlLanguage = () => sql({ dialect: PostgreSQL, schema: completions.schemas ?? {}, defaultSchema: completions.defaultSchema || undefined });
+
+const quoteIfNeeded = (name) => (/^[a-z_][a-z0-9_$]*$/.test(name) ? name : `"${name.replaceAll('"', '""')}"`);
+
+// Offers the columns of the tables in the statement under the cursor. lang-sql
+// only completes them after a table name or alias and a dot.
+function columnCompletions(context) {
+	const word = context.matchBefore(/[\w$]*/);
+	if (!word || (word.from === word.to && !context.explicit)) return null;
+	if (context.state.sliceDoc(word.from - 1, word.from) === ".") return null;
+	if (/String|Comment/.test(syntaxTree(context.state).resolveInner(context.pos, -1).name)) return null;
+
+	const seen = new Set();
+	const options = [];
+	for (const { schema, table } of tablesAt(context.state.doc.toString(), context.pos)) {
+		for (const column of completions.schemas?.[schema ?? completions.defaultSchema]?.[table] ?? []) {
+			if (seen.has(column)) continue;
+			seen.add(column);
+			options.push({ label: column, apply: quoteIfNeeded(column), detail: table, type: "property", boost: 99 });
+		}
+	}
+	return options.length ? { from: word.from, options, validFor: /^[\w$]*$/ } : null;
+}
 
 // Colours come from daisyUI's variables, so they follow the theme with no
 // reconfiguring when it changes.
@@ -54,6 +77,7 @@ function mount(panel) {
 			])),
 			basicSetup,
 			language.of(sqlLanguage()),
+			PostgreSQL.language.data.of({ autocomplete: columnCompletions }),
 			theme,
 			syntaxHighlighting(highlight),
 			placeholder("select 1;  (⌘/Ctrl+Enter to run)"),
