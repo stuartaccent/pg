@@ -226,31 +226,27 @@ templ BackupsBody(service, dir string, files []backupFile, sandboxes []dockerpg.
 		<p class="text-error mt-2">{ err.Error() }</p>
 	}
 	<button type="button" class="link link-hover text-base-content/60 text-xs mt-1 cursor-pointer" title="Open in Finder. Anything ending .backup here is listed." hx-post="/backups/open" hx-target="#backups-body">{ dir }</button>
-	<ul class="menu menu-sm w-full mt-2 max-h-[40vh] overflow-auto flex-nowrap">
+	<ul class="mt-2 max-h-[40vh] overflow-auto">
 		if len(files) == 0 {
-			<li class="text-base-content/50 px-2">No backups yet.</li>
+			<li class="text-base-content/50 text-sm py-1">No backups yet.</li>
 		}
 		for _, f := range files {
-			<li>
-				<div class="flex items-center gap-2">
-					<span class="min-w-0 flex-1 truncate font-mono text-xs" title={ f.Name }>{ f.Name }</span>
-					<span class="text-base-content/50 shrink-0 text-xs">{ f.Size }</span>
-					<button type="button" class="btn btn-soft btn-xs shrink-0" hx-post="/sandboxes" hx-vals={ fmt.Sprintf(`{"file":%q}`, f.Name) } hx-target="#job" onclick="document.querySelector('#backups').close()">Open in sandbox</button>
-				</div>
+			<li class="flex items-center gap-2 py-1">
+				<span class="min-w-0 flex-1 truncate font-mono text-xs" title={ f.Name }>{ f.Name }</span>
+				<span class="text-base-content/50 shrink-0 text-xs">{ f.Size }</span>
+				<button type="button" class="btn btn-soft btn-xs shrink-0" hx-post="/sandboxes" hx-vals={ fmt.Sprintf(`{"file":%q}`, f.Name) } hx-target="#job" onclick="document.querySelector('#backups').close()">Open in sandbox</button>
 			</li>
 		}
 	</ul>
 	if len(sandboxes) > 0 {
 		<h3 class="font-medium mt-4">Sandboxes</h3>
 		<p class="text-base-content/60 text-xs mt-1">Copies of real data, running in Docker until removed. Pick one from the service list to use it.</p>
-		<ul class="menu menu-sm w-full mt-2">
+		<ul class="mt-2">
 			for _, sb := range sandboxes {
-				<li>
-					<div class="flex items-center gap-2">
-						<span class="font-mono text-xs shrink-0">{ sb.Name }</span>
-						<span class="min-w-0 flex-1 truncate text-base-content/50 text-xs" title={ sb.Source }>{ sb.Source }</span>
-						<button type="button" class="btn btn-soft btn-error btn-xs shrink-0" hx-post={ "/sandboxes/" + sb.Name + "/remove" } hx-target="#backups-body">Remove</button>
-					</div>
+				<li class="flex items-center gap-2 py-1">
+					<span class="font-mono text-xs shrink-0">{ sb.Name }</span>
+					<span class="min-w-0 flex-1 truncate text-base-content/50 text-xs" title={ sb.Source }>{ sb.Source }</span>
+					<button type="button" class="btn btn-soft btn-error btn-xs shrink-0" hx-post={ "/sandboxes/" + sb.Name + "/remove" } hx-target="#backups-body">Remove</button>
 				</li>
 			}
 		</ul>
