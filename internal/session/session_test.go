@@ -173,18 +173,55 @@ func TestExplain(t *testing.T) {
 		t.Fatal(p.Err)
 	}
 
-	p := s.Explain("delete from explained;")
+	p := s.Explain("delete from explained;", false)
 	if p.Err != nil || !p.Done || len(p.Columns) != 1 || len(p.Rows) == 0 {
 		t.Fatalf("page = %+v", p)
 	}
 
 	// A second statement must be refused, not run.
-	if p := s.Explain("select 1; delete from explained"); p.Err == nil {
+	if p := s.Explain("select 1; delete from explained", false); p.Err == nil {
 		t.Fatal("two statements: want an error")
 	}
 	p = s.Run("select count(*) from explained")
 	if p.Err != nil || p.Rows[0][0].Text != "1" {
 		t.Fatalf("explain changed the table: %+v", p)
+	}
+}
+
+func TestExplainAnalyzeRollsBack(t *testing.T) {
+	s := newTestSession(t)
+	if p := s.Run("create temp table analyzed (id int); insert into analyzed values (1)"); p.Err != nil {
+		t.Fatal(p.Err)
+	}
+
+	p := s.Explain("delete from analyzed", true)
+	if p.Err != nil || !strings.Contains(p.Rows[0][0].Text, "actual") {
+		t.Fatalf("page = %+v", p)
+	}
+	if p := s.Run("select count(*) from analyzed"); p.Err != nil || p.Rows[0][0].Text != "1" {
+		t.Fatalf("analyze changed the table: %+v", p)
+	}
+
+	// A failure must roll back too, leaving the session usable.
+	if p := s.Explain("select nope", true); p.Err == nil {
+		t.Fatal("bad sql: want an error")
+	}
+	if p := s.Run("select 1"); p.Err != nil {
+		t.Fatalf("session left in a failed transaction: %v", p.Err)
+	}
+
+	// It must not end a transaction the user has open.
+	if p := s.Run("begin; delete from analyzed"); p.Err != nil {
+		t.Fatal(p.Err)
+	}
+	if p := s.Explain("select 1", true); !errors.Is(p.Err, ErrOpenTransaction) {
+		t.Fatalf("err = %v, want ErrOpenTransaction", p.Err)
+	}
+	if p := s.Run("select count(*) from analyzed"); p.Err != nil || p.Rows[0][0].Text != "0" {
+		t.Fatalf("user's transaction was lost: %+v", p)
+	}
+	if p := s.Run("rollback"); p.Err != nil {
+		t.Fatal(p.Err)
 	}
 }
 
@@ -202,7 +239,7 @@ func TestClosedSessionDoesNotReconnect(t *testing.T) {
 	if p := s.Run("select 1"); !errors.Is(p.Err, ErrClosed) {
 		t.Errorf("Run err = %v, want ErrClosed", p.Err)
 	}
-	if p := s.Explain("select 1"); !errors.Is(p.Err, ErrClosed) {
+	if p := s.Explain("select 1", false); !errors.Is(p.Err, ErrClosed) {
 		t.Errorf("Explain err = %v, want ErrClosed", p.Err)
 	}
 	if connects != 0 {

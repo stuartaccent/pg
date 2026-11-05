@@ -77,6 +77,15 @@ templ Index(services []string, current string, readOnly bool, err error) {
 					</div>
 				</div>
 			</div>
+			<dialog id="confirm" class="modal">
+				<form method="dialog" class="modal-box">
+					<p id="confirm-text" class="whitespace-pre-wrap"></p>
+					<div class="modal-action">
+						<button class="btn btn-soft btn-sm" value="no">Cancel</button>
+						<button class="btn btn-warning btn-sm" value="yes">Continue</button>
+					</div>
+				</form>
+			</dialog>
 		</body>
 	</html>
 }
@@ -107,6 +116,7 @@ templ tabPanel(id string) {
 		<div class="flex items-center gap-2 shrink-0">
 			<button type="submit" form={ "editor-" + id } class="btn btn-primary btn-sm">Run</button>
 			<button type="submit" form={ "editor-" + id } name="explain" value="1" class="btn btn-soft btn-sm">Explain</button>
+			<button type="submit" form={ "editor-" + id } name="explain" value="analyze" class="btn btn-soft btn-sm">Analyze</button>
 			<button type="button" class="btn btn-soft btn-sm" hx-post="/cancel" hx-vals={ fmt.Sprintf(`{"tab":%q}`, id) } hx-swap="none">Cancel</button>
 			<span id={ "running-" + id } class="htmx-indicator flex items-center gap-1 text-base-content/60">
 				<span class="loading loading-spinner loading-xs"></span>
@@ -137,17 +147,17 @@ templ ConnectStatus(service string, readOnly bool, err error) {
 }
 
 // TreeNodes is one level of the tree. A node's children load the first time
-// it is opened.
+// it is opened, or the next time after a failure.
 templ TreeNodes(nodes []catalog.Node, err error) {
 	if err != nil {
-		<li class="text-error whitespace-pre-wrap px-2">{ err.Error() }</li>
+		<li class="tree-error text-error whitespace-pre-wrap px-2">{ err.Error() }</li>
 	} else if len(nodes) == 0 {
 		<li class="text-base-content/50 px-2">None</li>
 	}
 	for _, n := range nodes {
 		<li>
 			if n.Kind != "" {
-				<details hx-get={ treeURL(n.Kind, n.ID) } hx-trigger="toggle once" hx-target="find ul">
+				<details hx-get={ treeURL(n.Kind, n.ID) } hx-trigger="toggle[target.open && target.querySelector(':scope > ul > li > .loading, :scope > ul > .tree-error') !== null]" hx-target="find ul">
 					<summary>
 						@treeLabel(n)
 					</summary>
@@ -174,7 +184,7 @@ templ treeLabel(n catalog.Node) {
 			<span class="shrink-0 max-w-full truncate" title={ n.Label }>{ n.Label }</span>
 		}
 		if n.Detail != "" {
-			<span class="truncate text-base-content/50" title={ n.Detail }>{ n.Detail }</span>
+			<span class="truncate shrink-[1000] text-base-content/50" title={ n.Detail }>{ n.Detail }</span>
 		}
 		if n.SQL != "" && n.Def != "" {
 			<button type="button" class="cursor-pointer shrink-0 ml-auto text-base-content/60 opacity-0 hover:underline group-hover:opacity-100 focus:opacity-100" aria-label={ "Show the definition of " + n.Label } data-url={ definitionURL(n) } onclick="useDefinition(event, this)">DDL</button>

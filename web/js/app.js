@@ -6,14 +6,15 @@ import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { Compartment, Prec } from "@codemirror/state";
 import { keymap, placeholder } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
+import { writesEveryRow } from "./risky.mjs";
 
 const views = new Map(); // tab id to its editor
 const language = new Compartment();
-let schema = {};
+let completions = {};
 let activeTab;
 const MIN_PANE = 80; // the smallest a dragged pane gets; what's beside it keeps twice this, as it holds the buttons too
 
-const sqlLanguage = () => sql({ dialect: PostgreSQL, schema, defaultSchema: "public" });
+const sqlLanguage = () => sql({ dialect: PostgreSQL, schema: completions.schemas ?? {}, defaultSchema: completions.defaultSchema || undefined });
 
 // Colours come from daisyUI's variables, so they follow the theme with no
 // reconfiguring when it changes.
@@ -52,7 +53,9 @@ function mount(panel) {
 			syntaxHighlighting(highlight),
 			placeholder("select 1;  (⌘/Ctrl+Enter to run)"),
 			EditorView.updateListener.of((update) => {
-				if (update.docChanged) textarea.value = update.state.doc.toString();
+				if (!update.docChanged) return;
+				textarea.value = update.state.doc.toString();
+				saveTabs();
 			}),
 		],
 	});
@@ -69,12 +72,50 @@ function selectTab(id) {
 
 async function closeTab(id) {
 	if (views.size === 1) return;
+	if (views.get(id).state.doc.length > 0 && !(await ask("Close this tab and discard its SQL?"))) return;
 	await fetch(`/tabs/${id}`, { method: "DELETE" });
 	views.get(id).destroy();
 	views.delete(id);
 	document.querySelector(`[data-tab="${id}"]`).remove();
 	document.querySelector(`[data-tab-button="${id}"]`).remove();
 	if (activeTab === id) selectTab([...views.keys()].at(-1));
+	saveTabs();
+}
+
+// ask shows the confirm dialog and resolves to whether the user continued.
+// Not confirm(), which webviews don't have to implement.
+function ask(message) {
+	const dialog = document.querySelector("#confirm");
+	document.querySelector("#confirm-text").textContent = message;
+	dialog.returnValue = "";
+	dialog.showModal();
+	return new Promise((resolve) => {
+		dialog.addEventListener("close", () => resolve(dialog.returnValue === "yes"), { once: true });
+	});
+}
+
+const saveTabs = () => localStorage.setItem("tabs", JSON.stringify([...views.values()].map((view) => view.state.doc.toString())));
+
+function setText(view, text) {
+	view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } });
+}
+
+const newTab = async () => {
+	await htmx.ajax("POST", "/tabs", { target: "#panels", swap: "beforeend" });
+	mountNewPanels();
+};
+
+// Brings back the SQL from last time, one tab each. A page load always starts
+// with a single empty tab from the server.
+async function restoreTabs() {
+	mountNewPanels();
+	const first = activeTab;
+	const saved = JSON.parse(localStorage.getItem("tabs") ?? "[]").filter(Boolean);
+	for (const [i, text] of saved.entries()) {
+		if (i > 0) await newTab();
+		setText(views.get(activeTab), text);
+	}
+	selectTab(first);
 }
 
 function mountNewPanels() {
@@ -86,12 +127,9 @@ function mountNewPanels() {
 // Shows text in the current tab if it's empty, otherwise in a new one, so
 // browsing the tree never loses SQL.
 async function openSQL(text) {
-	if (views.get(activeTab).state.doc.length > 0) {
-		await htmx.ajax("POST", "/tabs", { target: "#panels", swap: "beforeend" });
-		mountNewPanels();
-	}
+	if (views.get(activeTab).state.doc.length > 0) await newTab();
 	const view = views.get(activeTab);
-	view.dispatch({ changes: { from: 0, insert: text } });
+	setText(view, text);
 	view.focus();
 }
 
@@ -110,7 +148,7 @@ async function useDefinition(event, el) {
 
 // Reloads what the editors complete from, after a connect or refresh.
 async function loadSchema() {
-	schema = await (await fetch("/completions")).json();
+	completions = await (await fetch("/completions")).json();
 	for (const view of views.values()) view.dispatch({ effects: language.reconfigure(sqlLanguage()) });
 }
 
@@ -161,6 +199,26 @@ document.addEventListener("keydown", (event) => {
 
 Object.assign(window, { selectTab, closeTab, useSQL, useDefinition, resetTree });
 
+// Runs before htmx sends a query, for the ones worth a second thought.
+document.addEventListener("htmx:confirm", (event) => {
+	const { elt, triggeringEvent } = event.detail;
+	if (!elt.matches("form[hx-post='/query']")) return;
+	const mode = triggeringEvent?.submitter?.value;
+	const sql = elt.querySelector("textarea").value;
+	let warning;
+	if (mode === "analyze") {
+		warning = "Analyze really runs this query to time it. Changes are rolled back, but it takes as long as the query, and anything outside the transaction, such as sequences, stays changed.";
+	} else if (!mode && writesEveryRow(sql)) {
+		warning = "This has an update or delete with no where clause, so it changes every row.";
+	}
+	if (!warning) return;
+	event.preventDefault();
+	ask(warning).then((ok) => ok && event.detail.issueRequest(true));
+});
+
 htmx.onLoad(mountNewPanels);
-document.addEventListener("DOMContentLoaded", loadSchema);
+document.addEventListener("DOMContentLoaded", () => {
+	restoreTabs();
+	loadSchema();
+});
 document.addEventListener("connected", resetTree);

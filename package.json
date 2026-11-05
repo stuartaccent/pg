@@ -1,6 +1,7 @@
 {
   "private": true,
   "scripts": {
+    "test": "node --test web/js/*.test.mjs",
     "build": "esbuild web/js/app.js --bundle --minify --format=iife --target=safari15 --outfile=web/static/app.js"
   },
   "devDependencies": {
