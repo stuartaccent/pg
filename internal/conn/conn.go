@@ -35,6 +35,52 @@ func ServiceFilePath() (string, error) {
 	return filepath.Join(home, ".pg_service.conf"), nil
 }
 
+// PassFilePath returns the password file libpq would read: $PGPASSFILE, falling
+// back to ~/.pgpass.
+func PassFilePath() (string, error) {
+	if p := os.Getenv("PGPASSFILE"); p != "" {
+		return p, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".pgpass"), nil
+}
+
+// ExposedPassFile returns the path of the password file if anyone but its owner
+// can read it, otherwise "". libpq ignores such a file, but pgx uses it, so
+// nothing else would mention it.
+func ExposedPassFile() string {
+	path, err := PassFilePath()
+	if err != nil {
+		return ""
+	}
+	info, err := os.Stat(path)
+	if err != nil || info.Mode().Perm()&0o077 == 0 {
+		return ""
+	}
+	return path
+}
+
+// EnsureFile creates path if it's missing, readable only by its owner, as
+// libpq ignores a .pgpass that anyone else can read. An existing file is left
+// exactly as it is.
+func EnsureFile(path string) error {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	return f.Close()
+}
+
+// PasswordRejected reports whether err is the server turning down a password,
+// which includes there being none to send.
+func PasswordRejected(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == invalidPassword
+}
+
 // Services returns the sorted service names. A missing service file is not an
 // error; it just means there are no services yet.
 func Services() ([]string, error) {
@@ -100,6 +146,9 @@ func Export(ctx context.Context, c *pgconn.PgConn, query string, w io.Writer) (i
 	tag, err := c.CopyTo(ctx, w, "copy (\n"+query+"\n) to stdout with (format csv, header)")
 	return tag.RowsAffected(), err
 }
+
+// invalidPassword is the SQLSTATE for a rejected password.
+const invalidPassword = "28P01"
 
 // quote quotes a value for a keyword/value connection string.
 func quote(s string) string {
