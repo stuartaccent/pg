@@ -55,6 +55,13 @@ The session tests need a real server and are skipped otherwise:
 PGIDE_TEST_SERVICE=local go test -race ./...
 ```
 
+## Using it
+
+- ⌘/Ctrl+Enter runs the selection, or the whole editor if nothing's selected. So do Explain, Analyze and Export CSV.
+- Click a result cell to read all of it, format JSON and copy it.
+- Export CSV saves to `~/Downloads`, in a read-only transaction: it runs the query again, so one that writes is refused.
+- Tabs' SQL, history, the last service and pane sizes are kept in the webview's `localStorage`, so history holds whatever you've run.
+
 ## Layout
 
 - `cmd/pgide` — Wails window around `web.Handler`

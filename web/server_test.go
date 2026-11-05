@@ -4,8 +4,14 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/jackc/pgx/v5/pgconn"
+
+	"pg/internal/conn"
 )
 
 func get(t *testing.T, s *Server, method, url string) *httptest.ResponseRecorder {
@@ -67,5 +73,38 @@ func TestReadOnlyBadge(t *testing.T) {
 		if got := strings.Contains(b.String(), "read-only"); got != want {
 			t.Errorf("readOnly = %v: badge shown = %v", readOnly, got)
 		}
+	}
+}
+
+func TestSaveCSV(t *testing.T) {
+	service := os.Getenv("PGIDE_TEST_SERVICE")
+	if service == "" {
+		t.Skip("PGIDE_TEST_SERVICE not set")
+	}
+	// Connecting reads the real ~/.pgpass, so only the Downloads folder moves.
+	realHome, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PGPASSFILE", filepath.Join(realHome, ".pgpass"))
+	t.Setenv("PGSERVICEFILE", filepath.Join(realHome, ".pg_service.conf"))
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	connect := func(ctx context.Context) (*pgconn.PgConn, error) { return conn.Connect(ctx, service) }
+
+	path, rows, err := saveCSV(context.Background(), connect, "select 1 as a")
+	if err != nil || rows != 1 {
+		t.Fatalf("rows = %d, err = %v", rows, err)
+	}
+	if got, _ := os.ReadFile(path); string(got) != "a\n1\n" {
+		t.Errorf("file = %q", got)
+	}
+
+	if _, _, err := saveCSV(context.Background(), connect, "select nope"); err == nil {
+		t.Fatal("bad sql: want an error")
+	}
+	files, _ := filepath.Glob(filepath.Join(home, "Downloads", "*"))
+	if len(files) != 1 {
+		t.Errorf("failed export left a file behind: %v", files)
 	}
 }

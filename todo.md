@@ -41,17 +41,17 @@ Kept small on purpose: only build these once they're missed in real use.
 
 ### Working with results
 
-- [ ] See a cell's full value: results cut off at 40 characters, with no way to read the rest. Click a cell to open it, with JSON formatted.
-- [ ] Copy a cell or row to the clipboard.
-- [ ] Export a result as CSV, streamed from the session so large results stay out of memory.
-- [ ] Show a Running timer, so a slow query can be told from a stuck one.
+- [x] See a cell's full value: results cut off at 40 characters, with no way to read the rest. Click a cell to open it, with JSON formatted.
+- [x] Copy a cell or row to the clipboard.
+- [x] Export a result as CSV, streamed from the session so large results stay out of memory.
+- [x] Show a Running timer, so a slow query can be told from a stuck one.
 
 ### Editor
 
-- [ ] Run only the selected text, when there is a selection.
-- [ ] Query history: the last statements run, searchable, stored locally.
+- [x] Run only the selected text, when there is a selection.
+- [x] Query history: the last statements run, searchable, stored locally.
 - [x] Use the connection's `search_path` for autocomplete, rather than assuming `public`.
-- [ ] Format SQL. Needs a formatter dependency, so decide first.
+- [x] Format SQL. Needs a formatter dependency, so decide first.
 
 ### Tree
 
@@ -62,6 +62,6 @@ Kept small on purpose: only build these once they're missed in real use.
 
 ### App
 
-- [ ] Reconnect to the last service on launch.
-- [ ] Remember the sidebar width and editor height.
+- [x] Reconnect to the last service on launch.
+- [x] Remember the sidebar width and editor height.
 - [x] `EXPLAIN ANALYZE`, in a rolled back transaction, and only with a clear warning that it runs the query.

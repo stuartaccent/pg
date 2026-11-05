@@ -7,9 +7,18 @@
     themes: light --default, dark --prefersdark;
 }
 
+:root {
+    --sidebar-width: 18rem;
+    --editor-height: 10rem;
+}
+
 /* One rule rather than classes on every cell: results can be thousands of rows. */
 .results :is(th, td) {
     @apply max-w-[40ch] overflow-hidden text-ellipsis whitespace-pre;
+}
+
+.results tr[data-row] td {
+    @apply cursor-pointer hover:bg-base-200;
 }
 
 /* The last tab stays open: there's nowhere to go without one. */

@@ -44,7 +44,7 @@ templ Index(services []string, current string, readOnly bool, err error) {
 				<button type="button" class="btn btn-square btn-ghost btn-sm" aria-label="Toggle light or dark theme" onclick="toggleTheme()">◐</button>
 			</header>
 			<div class="flex flex-1 min-h-0 gap-2 px-2 pb-2">
-				<aside class="flex flex-col w-72 shrink-0 overflow-hidden rounded-box bg-base-100 shadow-md">
+				<aside class="flex flex-col w-(--sidebar-width) shrink-0 overflow-hidden rounded-box bg-base-100 shadow-md">
 					<div class="flex items-center gap-1 px-2 pt-2">
 						<input
 							id="tree-search"
@@ -86,6 +86,24 @@ templ Index(services []string, current string, readOnly bool, err error) {
 					</div>
 				</form>
 			</dialog>
+			<dialog id="cell" class="modal">
+				<div class="modal-box max-w-3xl">
+					<pre id="cell-text" class="font-mono text-xs whitespace-pre-wrap break-all max-h-[60vh] overflow-auto"></pre>
+					<div class="modal-action">
+						<button type="button" class="btn btn-soft btn-sm" onclick="copyCell(this, false)">Copy value</button>
+						<button type="button" class="btn btn-soft btn-sm" onclick="copyCell(this, true)">Copy row</button>
+						<form method="dialog"><button class="btn btn-sm">Close</button></form>
+					</div>
+				</div>
+				<form method="dialog" class="modal-backdrop"><button aria-label="Close">close</button></form>
+			</dialog>
+			<dialog id="history" class="modal">
+				<div class="modal-box max-w-3xl">
+					<input id="history-search" type="search" class="input input-sm w-full" placeholder="Search history…" aria-label="Search history" oninput="renderHistory()"/>
+					<ul id="history-list" class="menu menu-sm w-full mt-2 max-h-[60vh] overflow-auto flex-nowrap"></ul>
+				</div>
+				<form method="dialog" class="modal-backdrop"><button aria-label="Close">close</button></form>
+			</dialog>
 		</body>
 	</html>
 }
@@ -101,7 +119,7 @@ templ tabPanel(id string) {
 	<section data-tab={ id } class="flex flex-col flex-1 min-w-0 min-h-0 gap-2">
 		<form
 			id={ "editor-" + id }
-			class="h-40 overflow-hidden rounded-box bg-base-100 shadow-md shrink-0"
+			class="h-(--editor-height) overflow-hidden rounded-box bg-base-100 shadow-md shrink-0"
 			hx-post="/query"
 			hx-target={ "#results-" + id }
 			hx-sync="this:replace"
@@ -113,18 +131,31 @@ templ tabPanel(id string) {
 		<div role="separator" aria-orientation="horizontal" aria-label="Resize the editor" tabindex="0" data-resize="height" class="h-2 -my-2 shrink-0 cursor-row-resize touch-none rounded hover:bg-primary/30 focus:bg-primary/30 focus:outline-none"></div>
 		<!-- Outside the form on purpose: inside it, Cancel would inherit
 		     hx-sync="this:replace" and abort the very request it is cancelling. -->
-		<div class="flex items-center gap-2 shrink-0">
+		<div class="flex flex-wrap items-center gap-2 shrink-0">
 			<button type="submit" form={ "editor-" + id } class="btn btn-primary btn-sm">Run</button>
 			<button type="submit" form={ "editor-" + id } name="explain" value="1" class="btn btn-soft btn-sm">Explain</button>
 			<button type="submit" form={ "editor-" + id } name="explain" value="analyze" class="btn btn-soft btn-sm">Analyze</button>
 			<button type="button" class="btn btn-soft btn-sm" hx-post="/cancel" hx-vals={ fmt.Sprintf(`{"tab":%q}`, id) } hx-swap="none">Cancel</button>
+			<button type="button" class="btn btn-ghost btn-sm" onclick="formatSQL()">Format</button>
+			<button type="button" class="btn btn-ghost btn-sm" hx-post="/export" hx-include={ "#editor-" + id } hx-target={ "#notice-" + id } hx-indicator={ "#running-" + id }>Export CSV</button>
+			<button type="button" class="btn btn-ghost btn-sm" onclick="showHistory()">History</button>
 			<span id={ "running-" + id } class="htmx-indicator flex items-center gap-1 text-base-content/60">
 				<span class="loading loading-spinner loading-xs"></span>
-				Running…
+				Running… <span class="timer tabular-nums"></span>
 			</span>
+			<span id={ "notice-" + id } class="min-w-0 truncate"></span>
 		</div>
 		<main id={ "results-" + id } class="results flex-1 min-h-0 overflow-auto rounded-box bg-base-100 shadow-md"></main>
 	</section>
+}
+
+// ExportStatus says where an export went.
+templ ExportStatus(path string, rows int64, err error) {
+	if err != nil {
+		<span class="text-error" title={ err.Error() }>{ err.Error() }</span>
+	} else {
+		<span class="text-success" title={ path }>Saved { fmt.Sprint(rows) } rows to { path }</span>
+	}
 }
 
 // NewTab is a new tab's panel, plus its button in the tab strip.
@@ -230,10 +261,10 @@ templ Results(p session.Page, tab string) {
 // the next page when it scrolls into view, or a footer once the query is done.
 templ MoreRows(p session.Page, tab string) {
 	for _, row := range p.Rows {
-		<tr>
+		<tr data-row>
 			for _, v := range row {
 				if v.Null {
-					<td class="italic text-base-content/50">NULL</td>
+					<td data-null class="italic text-base-content/50">NULL</td>
 				} else {
 					<td>{ v.Text }</td>
 				}
