@@ -44,7 +44,7 @@ templ Index(services []string, current string, readOnly bool, err error) {
 				<button type="button" class="btn btn-square btn-ghost btn-sm" aria-label="Toggle light or dark theme" onclick="toggleTheme()">◐</button>
 			</header>
 			<div class="flex flex-1 min-h-0 gap-2 px-2 pb-2">
-				<aside class="flex flex-col w-72 shrink-0 resize-x overflow-hidden rounded-box bg-base-100 shadow-md">
+				<aside class="flex flex-col w-72 shrink-0 overflow-hidden rounded-box bg-base-100 shadow-md">
 					<div class="flex items-center gap-1 px-2 pt-2">
 						<input
 							id="tree-search"
@@ -64,6 +64,7 @@ templ Index(services []string, current string, readOnly bool, err error) {
 						<li class="text-base-content/60 px-2">Choose a service to browse it.</li>
 					</ul>
 				</aside>
+				<div role="separator" aria-orientation="vertical" aria-label="Resize the sidebar" tabindex="0" data-resize="width" class="w-2 -mx-2 shrink-0 cursor-col-resize touch-none rounded hover:bg-primary/30 focus:bg-primary/30 focus:outline-none"></div>
 				<div class="flex flex-col flex-1 min-w-0 gap-2">
 					<div class="flex items-center gap-1 shrink-0">
 						<div id="tabs" role="tablist" class="tabs tabs-border tabs-xs">
@@ -91,7 +92,7 @@ templ tabPanel(id string) {
 	<section data-tab={ id } class="flex flex-col flex-1 min-w-0 min-h-0 gap-2">
 		<form
 			id={ "editor-" + id }
-			class="h-40 resize-y overflow-hidden rounded-box bg-base-100 shadow-md shrink-0"
+			class="h-40 overflow-hidden rounded-box bg-base-100 shadow-md shrink-0"
 			hx-post="/query"
 			hx-target={ "#results-" + id }
 			hx-sync="this:replace"
@@ -100,6 +101,7 @@ templ tabPanel(id string) {
 			<input type="hidden" name="tab" value={ id }/>
 			<textarea name="sql" class="hidden" aria-hidden="true"></textarea>
 		</form>
+		<div role="separator" aria-orientation="horizontal" aria-label="Resize the editor" tabindex="0" data-resize="height" class="h-2 -my-2 shrink-0 cursor-row-resize touch-none rounded hover:bg-primary/30 focus:bg-primary/30 focus:outline-none"></div>
 		<!-- Outside the form on purpose: inside it, Cancel would inherit
 		     hx-sync="this:replace" and abort the very request it is cancelling. -->
 		<div class="flex items-center gap-2 shrink-0">
