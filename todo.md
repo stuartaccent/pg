@@ -65,3 +65,53 @@ Kept small on purpose: only build these once they're missed in real use.
 - [x] Reconnect to the last service on launch.
 - [x] Remember the sidebar width and editor height.
 - [x] `EXPLAIN ANALYZE`, in a rolled back transaction, and only with a clear warning that it runs the query.
+
+## Also done
+
+Built along the way, outside the lists above.
+
+### Look and feel
+
+- [x] Restyle with daisyUI on Tailwind, with a light and dark theme toggle.
+- [x] Drag bars to resize the editor and sidebar, with arrow keys too.
+- [x] Close all tabs.
+- [x] App icon in Menlo Bold on the dark theme's colours, with a matching favicon.
+- [x] Tidy the Backups dialog: lists line up with the title, no row hover, no focus ring on opening.
+
+### Tree
+
+- [x] Browser tree of the connected database, loading each level on expand, on its own connection.
+- [x] Trigger functions in their own group, as pgAdmin does.
+- [x] Collations, domains and types, each opening its definition.
+
+### Editor
+
+- [x] Autocomplete column names without a table prefix, from the tables in the statement under the cursor.
+- [x] Keep 2,000 statements of history, up to about 2MB, so it can't crowd out tabs' SQL.
+
+### Connections
+
+- [x] Config menu to open the service and password files in a text editor.
+- [x] Hint about `.pgpass` when a password is rejected.
+- [x] Warn when the password file is readable by others.
+- [x] Refresh the service list on coming back to the window.
+- [x] Let a failed connect be retried from the dropdown.
+
+### Backups
+
+- [x] Back up through Docker, using the image matching the server.
+- [x] Sandboxes: restore a backup into a throwaway container and connect to it, with a badge to show it's not the real thing.
+- [x] Link to open the backups folder in Finder.
+
+### Fixes
+
+- [x] Stop WebKit reusing responses, which left the tree empty in the desktop app.
+
+## Ideas
+
+Talked about but not built.
+
+- [ ] Verify a backup: restore it into a throwaway container and compare table and row counts.
+- [ ] Restore a backup, into a new database by default. Overwriting should mean typing the database's name, and be refused on read-only services.
+- [ ] Delete backups from the Backups dialog.
+- [ ] A proper `.app` bundle, so the Dock label says `pg` and the generic tile doesn't flash at launch.
