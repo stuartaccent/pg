@@ -1,0 +1,205 @@
+package web
+
+import (
+	"fmt"
+	"net/url"
+	"strings"
+	"time"
+
+	"pg/internal/catalog"
+	"pg/internal/session"
+)
+
+templ Index(services []string, current string, err error) {
+	<!DOCTYPE html>
+	<html lang="en">
+		<head>
+			<meta charset="utf-8"/>
+			<title>pg</title>
+			<script src="/static/theme.js"></script>
+			<script src="/static/tree.js"></script>
+			<script src="/static/htmx.min.js"></script>
+			<link rel="stylesheet" href="/static/app.css"/>
+		</head>
+		<body class="h-screen flex flex-col gap-2 bg-base-300 text-sm">
+			<header class="navbar bg-base-100 border-b border-base-300 min-h-12 shrink-0 gap-2 px-2" data-theme="dark">
+				<form hx-post="/connect" hx-trigger="change" hx-target="#status">
+					<select name="service" class="select select-sm w-auto">
+						<option value="" disabled selected?={ current == "" }>Choose a service…</option>
+						for _, name := range services {
+							<option value={ name } selected?={ name == current }>{ name }</option>
+						}
+					</select>
+				</form>
+				<span id="status" class="flex-1 min-w-0">
+					if err != nil {
+						<span class="text-error whitespace-pre-wrap">{ err.Error() }</span>
+					} else if len(services) == 0 {
+						<span class="text-base-content/60">No services found in ~/.pg_service.conf</span>
+					} else if current != "" {
+						@ConnectStatus(current, nil)
+					}
+				</span>
+				<button type="button" class="btn btn-square btn-ghost btn-sm" aria-label="Toggle light or dark theme" onclick="toggleTheme()">◐</button>
+			</header>
+			<div class="flex flex-1 min-h-0 gap-2 px-2 pb-2">
+				<aside class="w-72 shrink-0 resize-x overflow-auto rounded-box bg-base-100 shadow-md">
+					<div class="flex items-center justify-between px-3 pt-2">
+						<span class="font-medium">Browser</span>
+						<button type="button" class="btn btn-square btn-ghost btn-xs" aria-label="Refresh tree" hx-get={ treeURL(catalog.RootKind, "") } hx-target="#tree">↻</button>
+					</div>
+					<ul id="tree" class="menu menu-xs w-full" hx-get={ treeURL(catalog.RootKind, "") } hx-trigger="load, connected from:body">
+						<li class="text-base-content/60 px-2">Choose a service to browse it.</li>
+					</ul>
+				</aside>
+				<div class="flex flex-col flex-1 min-w-0 gap-2">
+					<form
+						id="editor"
+						class="rounded-box bg-base-100 shadow-md overflow-hidden shrink-0"
+						hx-post="/query"
+						hx-trigger="submit, keydown[(metaKey||ctrlKey)&&key=='Enter'] from:#sql"
+						hx-target="#results"
+						hx-sync="this:replace"
+						hx-indicator="#running"
+					>
+						<textarea id="sql" name="sql" class="textarea textarea-ghost font-mono h-40 w-full resize-y focus:outline-none" spellcheck="false" autofocus placeholder="select 1;  (⌘/Ctrl+Enter to run)"></textarea>
+					</form>
+					<!-- Outside the form on purpose: inside it, Cancel would inherit
+			     hx-sync="this:replace" and abort the very request it is cancelling. -->
+					<div class="flex items-center gap-2 shrink-0">
+						<button type="submit" form="editor" class="btn btn-primary btn-sm">Run</button>
+						<button type="button" class="btn btn-soft btn-sm" hx-post="/cancel" hx-swap="none">Cancel</button>
+						<span id="running" class="htmx-indicator flex items-center gap-1 text-base-content/60">
+							<span class="loading loading-spinner loading-xs"></span>
+							Running…
+						</span>
+					</div>
+					<main id="results" class="flex-1 min-h-0 overflow-auto rounded-box bg-base-100 shadow-md"></main>
+				</div>
+			</div>
+		</body>
+	</html>
+}
+
+templ ConnectStatus(service string, err error) {
+	if err != nil {
+		<span class="text-error whitespace-pre-wrap">{ err.Error() }</span>
+	} else {
+		<span class="text-success">Connected to { service }</span>
+	}
+}
+
+// TreeNodes is one level of the tree. A node's children load the first time
+// it is opened.
+templ TreeNodes(nodes []catalog.Node, err error) {
+	if err != nil {
+		<li class="text-error whitespace-pre-wrap px-2">{ err.Error() }</li>
+	} else if len(nodes) == 0 {
+		<li class="text-base-content/50 px-2">None</li>
+	}
+	for _, n := range nodes {
+		<li>
+			if n.Kind != "" {
+				<details hx-get={ treeURL(n.Kind, n.ID) } hx-trigger="toggle once" hx-target="find ul">
+					<summary>
+						@treeLabel(n)
+					</summary>
+					<ul>
+						<li><span class="loading loading-spinner loading-xs"></span></li>
+					</ul>
+				</details>
+			} else {
+				<div>
+					@treeLabel(n)
+				</div>
+			}
+		</li>
+	}
+}
+
+templ treeLabel(n catalog.Node) {
+	<span class="flex items-baseline gap-2 min-w-0">
+		if n.SQL != "" {
+			<button type="button" class="cursor-pointer shrink-0 max-w-full truncate hover:underline" title={ n.Label } data-sql={ n.SQL } onclick="useSQL(event, this)">{ n.Label }</button>
+		} else {
+			<span class="shrink-0 max-w-full truncate" title={ n.Label }>{ n.Label }</span>
+		}
+		if n.Detail != "" {
+			<span class="truncate text-base-content/50" title={ n.Detail }>{ n.Detail }</span>
+		}
+	</span>
+}
+
+func treeURL(kind, id string) string {
+	return "/tree?" + url.Values{"kind": {kind}, "id": {id}}.Encode()
+}
+
+templ Results(p session.Page) {
+	if len(p.Columns) == 0 {
+		@summary(p)
+	} else {
+		<table class="table table-sm table-pin-rows font-mono">
+			<thead>
+				<tr>
+					for _, c := range p.Columns {
+						<th>{ c }</th>
+					}
+				</tr>
+			</thead>
+			<tbody>
+				@MoreRows(p)
+			</tbody>
+		</table>
+	}
+}
+
+// MoreRows is a page of rows followed by either a sentinel row that loads
+// the next page when it scrolls into view, or a footer once the query is done.
+templ MoreRows(p session.Page) {
+	for _, row := range p.Rows {
+		<tr>
+			for _, v := range row {
+				if v.Null {
+					<td class="italic text-base-content/50">NULL</td>
+				} else {
+					<td>{ v.Text }</td>
+				}
+			}
+		</tr>
+	}
+	if p.Done {
+		<tr>
+			<td colspan={ fmt.Sprint(p.NumCols) }>
+				@summary(p)
+			</td>
+		</tr>
+	} else {
+		<tr
+			hx-get={ fmt.Sprintf("/query/%d/more", p.QueryID) }
+			hx-trigger="intersect once"
+			hx-swap="outerHTML"
+		>
+			<td colspan={ fmt.Sprint(p.NumCols) } class="text-base-content/60">{ fmt.Sprint(p.Total) } rows so far, loading more…</td>
+		</tr>
+	}
+}
+
+templ summary(p session.Page) {
+	<div class="p-2">
+		if p.Err != nil {
+			<span class="text-error whitespace-pre-wrap">{ p.Err.Error() }</span>
+		} else {
+			<span class="text-success">{ summaryText(p) }</span>
+		}
+	</div>
+}
+
+func summaryText(p session.Page) string {
+	parts := make([]string, 0, len(p.Tags)+2)
+	if p.NumCols > 0 {
+		parts = append(parts, fmt.Sprintf("%d rows", p.Total))
+	}
+	parts = append(parts, p.Tags...)
+	parts = append(parts, p.Elapsed.Round(time.Millisecond).String())
+	return strings.Join(parts, " · ")
+}

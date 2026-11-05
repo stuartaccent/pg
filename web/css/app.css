@@ -1,0 +1,12 @@
+@import "tailwindcss" source(none);
+
+@source "../views.templ";
+
+@plugin "./daisyui.mjs" {
+    themes: light --default, dark --prefersdark;
+}
+
+/* One rule rather than classes on every cell: results can be thousands of rows. */
+#results :is(th, td) {
+    @apply max-w-[40ch] overflow-hidden text-ellipsis whitespace-pre;
+}
