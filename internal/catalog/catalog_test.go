@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"errors"
 	"os"
 	"slices"
 	"strings"
@@ -60,7 +61,8 @@ func TestWalk(t *testing.T) {
 	// first step. The awkward name proves identifiers get quoted.
 	children(t, c, RootKind, "")
 	setup := `
-		create temp table "Odd ""name" (id int primary key, label varchar(10));
+		create temp table "Odd ""name" (id int primary key, label varchar(10) default 'x', extra int generated always as (id * 2) stored);
+		create index on "Odd ""name" (label);
 		create temp view odd_view as select 1 as one;
 		create temp sequence odd_seq;
 		select pg_my_temp_schema()::regnamespace::text`
@@ -70,8 +72,12 @@ func TestWalk(t *testing.T) {
 	}
 	schema := string(res[len(res)-1].Rows[0][0])
 
-	if got := labels(children(t, c, "schema", schema)); !slices.Equal(got, []string{"Tables", "Views", "Materialized views", "Functions", "Sequences"}) {
+	schemaGroups := children(t, c, "schema", schema)
+	if got := labels(schemaGroups); !slices.Equal(got, []string{"Tables", "Views", "Materialized views", "Functions", "Sequences"}) {
 		t.Errorf("schema groups = %v", got)
+	}
+	if schemaGroups[0].Detail != "1" || schemaGroups[3].Detail != "0" || schemaGroups[0].ID != schema {
+		t.Errorf("schema group details = %+v", schemaGroups)
 	}
 
 	tables := children(t, c, "tables", schema)
@@ -95,13 +101,13 @@ func TestWalk(t *testing.T) {
 	}
 
 	cols := children(t, c, "columns", table.ID)
-	if got := labels(cols); !slices.Equal(got, []string{"id", "label"}) {
+	if got := labels(cols); !slices.Equal(got, []string{"id", "label", "extra"}) {
 		t.Errorf("columns = %v", got)
 	}
 	if cols[0].Detail != "integer not null" || cols[1].Detail != "character varying(10)" {
 		t.Errorf("column details = %q, %q", cols[0].Detail, cols[1].Detail)
 	}
-	if idx := children(t, c, "indexes", table.ID); len(idx) != 1 || !strings.Contains(idx[0].Detail, "UNIQUE INDEX") {
+	if idx := children(t, c, "indexes", table.ID); len(idx) != 2 {
 		t.Errorf("indexes = %+v", idx)
 	}
 	if con := children(t, c, "constraints", table.ID); len(con) != 1 || con[0].Detail != "PRIMARY KEY (id)" {
@@ -116,6 +122,87 @@ func TestWalk(t *testing.T) {
 	}
 	if f := children(t, c, "functions", schema); len(f) != 0 {
 		t.Errorf("functions = %+v", f)
+	}
+
+	// Each definition must be SQL that Postgres accepts. Run them in a rolled
+	// back transaction, under a new schema name so nothing clashes.
+	ctx := context.Background()
+	def, err := c.Definition(ctx, table.Def, table.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"id integer not null", "default 'x'", "generated always as ((id * 2)) stored", "PRIMARY KEY (id)", "CREATE INDEX"} {
+		if !strings.Contains(def, want) {
+			t.Errorf("definition lacks %q:\n%s", want, def)
+		}
+	}
+	rerun := strings.NewReplacer(schema+".", "defcheck.", `"Odd ""name_pkey"`, "defcheck_pkey",
+		`"Odd ""name_label_idx" ON pg_temp.`, "defcheck_idx ON defcheck.").Replace(def)
+	if _, err := c.conn.Exec(ctx, "begin; create schema defcheck; "+rerun).ReadAll(); err != nil {
+		t.Errorf("table definition does not run: %v\n%s", err, rerun)
+	}
+	if _, err := c.conn.Exec(ctx, "rollback").ReadAll(); err != nil {
+		t.Fatal(err)
+	}
+
+	view := children(t, c, "views", schema)[0]
+	if def, err := c.Definition(ctx, view.Def, view.ID); err != nil || !strings.Contains(def, "create or replace view") {
+		t.Errorf("view definition = %q, %v", def, err)
+	}
+	seq := children(t, c, "sequences", schema)[0]
+	if def, err := c.Definition(ctx, seq.Def, seq.ID); err != nil || !strings.Contains(def, "create sequence") {
+		t.Errorf("sequence definition = %q, %v", def, err)
+	}
+	if _, err := c.Definition(ctx, "nope", "1"); err == nil {
+		t.Error("unknown definition: want an error")
+	}
+	if _, err := c.Definition(ctx, "view", "0"); err == nil {
+		t.Error("missing object: want an error")
+	}
+}
+
+func TestSearch(t *testing.T) {
+	c := newTestCatalog(t)
+	if got, want := labels(children(t, c, SearchKind, "")), labels(children(t, c, RootKind, "")); !slices.Equal(got, want) {
+		t.Errorf("empty search = %v, want the top level %v", got, want)
+	}
+	// Temp schemas are hidden from search, like every pg_ schema.
+	if _, err := c.conn.Exec(context.Background(), "create temp table searchable_tmp (id int)").ReadAll(); err != nil {
+		t.Fatal(err)
+	}
+	if got := children(t, c, SearchKind, "searchable_tmp"); len(got) != 0 {
+		t.Errorf("search found a system schema's table: %+v", got)
+	}
+	// % must be a literal character, not a wildcard.
+	if got := children(t, c, SearchKind, "%"); len(got) != 0 {
+		t.Errorf("search for %% = %d nodes", len(got))
+	}
+}
+
+func TestClosedCatalogDoesNotReconnect(t *testing.T) {
+	c := newTestCatalog(t)
+	children(t, c, RootKind, "")
+	connects := 0
+	connect := c.connect
+	c.connect = func(ctx context.Context) (*pgconn.PgConn, error) {
+		connects++
+		return connect(ctx)
+	}
+	if err := c.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Children(context.Background(), RootKind, ""); !errors.Is(err, ErrClosed) {
+		t.Errorf("err = %v, want ErrClosed", err)
+	}
+	if connects != 0 {
+		t.Errorf("reconnected %d times", connects)
+	}
+}
+
+func TestCompletions(t *testing.T) {
+	c := newTestCatalog(t)
+	if _, err := c.Completions(context.Background()); err != nil {
+		t.Fatal(err)
 	}
 }
 

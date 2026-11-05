@@ -10,15 +10,16 @@ import (
 	"pg/internal/session"
 )
 
-templ Index(services []string, current string, err error) {
+templ Index(services []string, current string, readOnly bool, err error) {
 	<!DOCTYPE html>
 	<html lang="en">
 		<head>
 			<meta charset="utf-8"/>
 			<title>pg</title>
 			<script src="/static/theme.js"></script>
-			<script src="/static/tree.js"></script>
 			<script src="/static/htmx.min.js"></script>
+			<script src="/static/app.js" defer></script>
+			<link rel="icon" href="/static/favicon.svg" type="image/svg+xml"/>
 			<link rel="stylesheet" href="/static/app.css"/>
 		</head>
 		<body class="h-screen flex flex-col gap-2 bg-base-300 text-sm">
@@ -37,55 +38,99 @@ templ Index(services []string, current string, err error) {
 					} else if len(services) == 0 {
 						<span class="text-base-content/60">No services found in ~/.pg_service.conf</span>
 					} else if current != "" {
-						@ConnectStatus(current, nil)
+						@ConnectStatus(current, readOnly, nil)
 					}
 				</span>
 				<button type="button" class="btn btn-square btn-ghost btn-sm" aria-label="Toggle light or dark theme" onclick="toggleTheme()">◐</button>
 			</header>
 			<div class="flex flex-1 min-h-0 gap-2 px-2 pb-2">
-				<aside class="w-72 shrink-0 resize-x overflow-auto rounded-box bg-base-100 shadow-md">
-					<div class="flex items-center justify-between px-3 pt-2">
-						<span class="font-medium">Browser</span>
-						<button type="button" class="btn btn-square btn-ghost btn-xs" aria-label="Refresh tree" hx-get={ treeURL(catalog.RootKind, "") } hx-target="#tree">↻</button>
+				<aside class="flex flex-col w-72 shrink-0 resize-x overflow-hidden rounded-box bg-base-100 shadow-md">
+					<div class="flex items-center gap-1 px-2 pt-2">
+						<input
+							id="tree-search"
+							type="search"
+							name="id"
+							class="input input-xs flex-1"
+							placeholder="Search objects…"
+							aria-label="Search objects"
+							hx-get={ "/tree?kind=" + catalog.SearchKind }
+							hx-trigger="input changed delay:200ms, search"
+							hx-target="#tree"
+							hx-sync="this:replace"
+						/>
+						<button type="button" class="btn btn-square btn-ghost btn-xs" aria-label="Refresh tree" hx-get={ treeURL(catalog.RootKind, "") } hx-target="#tree" onclick="resetTree()">↻</button>
 					</div>
-					<ul id="tree" class="menu menu-xs w-full" hx-get={ treeURL(catalog.RootKind, "") } hx-trigger="load, connected from:body">
+					<ul id="tree" class="menu menu-xs w-full flex-1 min-h-0 overflow-auto flex-nowrap" hx-get={ treeURL(catalog.RootKind, "") } hx-trigger="load, connected from:body">
 						<li class="text-base-content/60 px-2">Choose a service to browse it.</li>
 					</ul>
 				</aside>
 				<div class="flex flex-col flex-1 min-w-0 gap-2">
-					<form
-						id="editor"
-						class="rounded-box bg-base-100 shadow-md overflow-hidden shrink-0"
-						hx-post="/query"
-						hx-trigger="submit, keydown[(metaKey||ctrlKey)&&key=='Enter'] from:#sql"
-						hx-target="#results"
-						hx-sync="this:replace"
-						hx-indicator="#running"
-					>
-						<textarea id="sql" name="sql" class="textarea textarea-ghost font-mono h-40 w-full resize-y focus:outline-none" spellcheck="false" autofocus placeholder="select 1;  (⌘/Ctrl+Enter to run)"></textarea>
-					</form>
-					<!-- Outside the form on purpose: inside it, Cancel would inherit
-			     hx-sync="this:replace" and abort the very request it is cancelling. -->
-					<div class="flex items-center gap-2 shrink-0">
-						<button type="submit" form="editor" class="btn btn-primary btn-sm">Run</button>
-						<button type="button" class="btn btn-soft btn-sm" hx-post="/cancel" hx-swap="none">Cancel</button>
-						<span id="running" class="htmx-indicator flex items-center gap-1 text-base-content/60">
-							<span class="loading loading-spinner loading-xs"></span>
-							Running…
-						</span>
+					<div class="flex items-center gap-1 shrink-0">
+						<div id="tabs" role="tablist" class="tabs tabs-border tabs-xs">
+							@tabButton("1")
+						</div>
+						<button type="button" class="btn btn-square btn-ghost btn-xs" aria-label="New query tab" hx-post="/tabs" hx-target="#panels" hx-swap="beforeend">+</button>
 					</div>
-					<main id="results" class="flex-1 min-h-0 overflow-auto rounded-box bg-base-100 shadow-md"></main>
+					<div id="panels" class="flex flex-1 min-h-0">
+						@tabPanel("1")
+					</div>
 				</div>
 			</div>
 		</body>
 	</html>
 }
 
-templ ConnectStatus(service string, err error) {
+templ tabButton(id string) {
+	<span class="tab gap-2" data-tab-button={ id }>
+		<button type="button" class="cursor-pointer" onclick="selectTab(this.parentElement.dataset.tabButton)">Query { id }</button>
+		<button type="button" class="tab-close cursor-pointer opacity-50 hover:opacity-100" aria-label={ "Close Query " + id } onclick="closeTab(this.parentElement.dataset.tabButton)">✕</button>
+	</span>
+}
+
+templ tabPanel(id string) {
+	<section data-tab={ id } class="flex flex-col flex-1 min-w-0 min-h-0 gap-2">
+		<form
+			id={ "editor-" + id }
+			class="h-40 resize-y overflow-hidden rounded-box bg-base-100 shadow-md shrink-0"
+			hx-post="/query"
+			hx-target={ "#results-" + id }
+			hx-sync="this:replace"
+			hx-indicator={ "#running-" + id }
+		>
+			<input type="hidden" name="tab" value={ id }/>
+			<textarea name="sql" class="hidden" aria-hidden="true"></textarea>
+		</form>
+		<!-- Outside the form on purpose: inside it, Cancel would inherit
+		     hx-sync="this:replace" and abort the very request it is cancelling. -->
+		<div class="flex items-center gap-2 shrink-0">
+			<button type="submit" form={ "editor-" + id } class="btn btn-primary btn-sm">Run</button>
+			<button type="submit" form={ "editor-" + id } name="explain" value="1" class="btn btn-soft btn-sm">Explain</button>
+			<button type="button" class="btn btn-soft btn-sm" hx-post="/cancel" hx-vals={ fmt.Sprintf(`{"tab":%q}`, id) } hx-swap="none">Cancel</button>
+			<span id={ "running-" + id } class="htmx-indicator flex items-center gap-1 text-base-content/60">
+				<span class="loading loading-spinner loading-xs"></span>
+				Running…
+			</span>
+		</div>
+		<main id={ "results-" + id } class="results flex-1 min-h-0 overflow-auto rounded-box bg-base-100 shadow-md"></main>
+	</section>
+}
+
+// NewTab is a new tab's panel, plus its button in the tab strip.
+templ NewTab(id string) {
+	@tabPanel(id)
+	<div hx-swap-oob="beforeend:#tabs">
+		@tabButton(id)
+	</div>
+}
+
+templ ConnectStatus(service string, readOnly bool, err error) {
 	if err != nil {
 		<span class="text-error whitespace-pre-wrap">{ err.Error() }</span>
 	} else {
 		<span class="text-success">Connected to { service }</span>
+		if readOnly {
+			<span class="badge badge-warning badge-sm ml-1">read-only</span>
+		}
 	}
 }
 
@@ -118,14 +163,19 @@ templ TreeNodes(nodes []catalog.Node, err error) {
 }
 
 templ treeLabel(n catalog.Node) {
-	<span class="flex items-baseline gap-2 min-w-0">
+	<span class="group flex items-baseline gap-2 min-w-0 w-full">
 		if n.SQL != "" {
-			<button type="button" class="cursor-pointer shrink-0 max-w-full truncate hover:underline" title={ n.Label } data-sql={ n.SQL } onclick="useSQL(event, this)">{ n.Label }</button>
+			<button type="button" class="cursor-pointer min-w-0 truncate hover:underline" title={ n.Label } data-sql={ n.SQL } onclick="useSQL(event, this)">{ n.Label }</button>
+		} else if n.Def != "" {
+			<button type="button" class="cursor-pointer shrink-0 max-w-full truncate hover:underline" title={ n.Label } data-url={ definitionURL(n) } onclick="useDefinition(event, this)">{ n.Label }</button>
 		} else {
 			<span class="shrink-0 max-w-full truncate" title={ n.Label }>{ n.Label }</span>
 		}
 		if n.Detail != "" {
 			<span class="truncate text-base-content/50" title={ n.Detail }>{ n.Detail }</span>
+		}
+		if n.SQL != "" && n.Def != "" {
+			<button type="button" class="cursor-pointer shrink-0 ml-auto text-base-content/60 opacity-0 hover:underline group-hover:opacity-100 focus:opacity-100" aria-label={ "Show the definition of " + n.Label } data-url={ definitionURL(n) } onclick="useDefinition(event, this)">DDL</button>
 		}
 	</span>
 }
@@ -134,8 +184,19 @@ func treeURL(kind, id string) string {
 	return "/tree?" + url.Values{"kind": {kind}, "id": {id}}.Encode()
 }
 
-templ Results(p session.Page) {
+func definitionURL(n catalog.Node) string {
+	return "/definition?" + url.Values{"def": {n.Def}, "id": {n.ID}}.Encode()
+}
+
+templ Results(p session.Page, tab string) {
 	if len(p.Columns) == 0 {
+		@summary(p)
+	} else if isPlan(p) {
+		<pre class="p-2 font-mono text-xs">
+			for _, row := range p.Rows {
+				<div class={ templ.KV("text-warning", strings.Contains(row[0].Text, "Seq Scan")) }>{ row[0].Text }</div>
+			}
+		</pre>
 		@summary(p)
 	} else {
 		<table class="table table-sm table-pin-rows font-mono">
@@ -147,7 +208,7 @@ templ Results(p session.Page) {
 				</tr>
 			</thead>
 			<tbody>
-				@MoreRows(p)
+				@MoreRows(p, tab)
 			</tbody>
 		</table>
 	}
@@ -155,7 +216,7 @@ templ Results(p session.Page) {
 
 // MoreRows is a page of rows followed by either a sentinel row that loads
 // the next page when it scrolls into view, or a footer once the query is done.
-templ MoreRows(p session.Page) {
+templ MoreRows(p session.Page, tab string) {
 	for _, row := range p.Rows {
 		<tr>
 			for _, v := range row {
@@ -175,7 +236,7 @@ templ MoreRows(p session.Page) {
 		</tr>
 	} else {
 		<tr
-			hx-get={ fmt.Sprintf("/query/%d/more", p.QueryID) }
+			hx-get={ fmt.Sprintf("/query/%d/more?tab=%s", p.QueryID, url.QueryEscape(tab)) }
 			hx-trigger="intersect once"
 			hx-swap="outerHTML"
 		>
@@ -192,6 +253,12 @@ templ summary(p session.Page) {
 			<span class="text-success">{ summaryText(p) }</span>
 		}
 	</div>
+}
+
+// isPlan reports whether p is an EXPLAIN result, typed or from the Explain
+// button, which reads better as text than as a one-column grid.
+func isPlan(p session.Page) bool {
+	return p.Done && len(p.Columns) == 1 && p.Columns[0] == "QUERY PLAN"
 }
 
 func summaryText(p session.Page) string {
