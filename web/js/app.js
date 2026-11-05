@@ -210,6 +210,11 @@ function remember(sql) {
 	localStorage.setItem("history", JSON.stringify(history));
 }
 
+async function showBackups() {
+	await htmx.ajax("GET", "/backups", { target: "#backups-body" });
+	document.querySelector("#backups").showModal();
+}
+
 function renderHistory() {
 	const term = document.querySelector("#history-search").value.toLowerCase();
 	const list = document.querySelector("#history-list");
@@ -348,7 +353,7 @@ document.addEventListener("keydown", (event) => {
 	resize(bar, sizeOf(bar) + step);
 });
 
-Object.assign(window, { selectTab, closeTab, closeAllTabs, useSQL, useDefinition, resetTree, formatSQL, showHistory, renderHistory, copyCell });
+Object.assign(window, { selectTab, closeTab, closeAllTabs, useSQL, useDefinition, resetTree, formatSQL, showHistory, showBackups, renderHistory, copyCell });
 
 document.addEventListener("click", (event) => {
 	const td = event.target.closest?.(".results tr[data-row] td");

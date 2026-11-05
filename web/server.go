@@ -23,6 +23,7 @@ import (
 
 	"pg/internal/catalog"
 	"pg/internal/conn"
+	"pg/internal/dockerpg"
 	"pg/internal/session"
 )
 
@@ -30,15 +31,18 @@ import (
 var static embed.FS
 
 // Server holds one query session per tab and the tree's catalog, all for the
-// connected service.
+// connected service, plus the backup or sandbox job in progress.
 type Server struct {
 	mu       sync.Mutex
 	service  string                                        // guarded by mu
 	readOnly bool                                          // guarded by mu
+	settings conn.Settings                                 // guarded by mu
+	image    string                                        // guarded by mu; the matching Postgres image
 	connect  func(context.Context) (*pgconn.PgConn, error) // guarded by mu; nil until connected
 	sessions map[string]*session.Session                   // guarded by mu; by tab id
 	cat      *catalog.Catalog                              // guarded by mu
 	lastTab  int                                           // guarded by mu
+	job      *job                                          // guarded by mu; the latest one
 }
 
 func New() *Server { return &Server{sessions: map[string]*session.Session{}} }
@@ -51,6 +55,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /connect", s.connectService)
 	mux.HandleFunc("GET /services", s.services)
 	mux.HandleFunc("POST /config/{file}", s.editConfig)
+	mux.HandleFunc("GET /backups", s.backups)
+	mux.HandleFunc("POST /backups/open", s.openBackups)
+	mux.HandleFunc("POST /backup", s.backup)
+	mux.HandleFunc("POST /sandboxes", s.newSandbox)
+	mux.HandleFunc("POST /sandboxes/{name}/remove", s.removeSandbox)
+	mux.HandleFunc("GET /job", s.jobStatus)
+	mux.HandleFunc("POST /job/cancel", s.cancelJob)
 	mux.HandleFunc("POST /tabs", s.newTab)
 	mux.HandleFunc("DELETE /tabs/{id}", s.closeTab)
 	mux.HandleFunc("POST /query", s.query)
@@ -72,11 +83,23 @@ func noStore(next http.Handler) http.Handler {
 	})
 }
 
-// Close closes every session and the catalog, and forgets the service.
+// Close stops any job and closes the connections, for when the app quits.
 func (s *Server) Close() {
+	s.mu.Lock()
+	j := s.job
+	s.mu.Unlock()
+	if j != nil {
+		j.cancel()
+	}
+	s.disconnect()
+}
+
+// disconnect closes every session and the catalog, and forgets the service.
+func (s *Server) disconnect() {
 	s.mu.Lock()
 	sessions, cat := s.sessions, s.cat
 	s.sessions, s.cat, s.connect, s.service, s.readOnly = map[string]*session.Session{}, nil, nil, "", false
+	s.settings, s.image = conn.Settings{}, ""
 	s.mu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -115,25 +138,25 @@ func (s *Server) catalog() *catalog.Catalog {
 }
 
 func (s *Server) index(w http.ResponseWriter, r *http.Request) {
-	services, err := conn.Services()
+	services, _, err := serviceList(r.Context())
 
 	// A page load starts over with one tab, so the old tabs' sessions go.
 	s.mu.Lock()
 	old := s.sessions
 	s.sessions = map[string]*session.Session{}
 	s.lastTab = 1
-	current, readOnly := s.service, s.readOnly
+	current, readOnly, j := s.service, s.readOnly, s.job
 	s.mu.Unlock()
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 	closeSessions(ctx, old)
 
-	render(w, r, Index(services, current, readOnly, err))
+	render(w, r, Index(services, current, readOnly, j.view(), err))
 }
 
 func (s *Server) connectService(w http.ResponseWriter, r *http.Request) {
 	service := r.FormValue("service")
-	services, err := conn.Services()
+	services, sandboxes, err := serviceList(r.Context())
 	if err == nil && !slices.Contains(services, service) {
 		err = errors.New("unknown service " + strconv.Quote(service))
 	}
@@ -141,29 +164,52 @@ func (s *Server) connectService(w http.ResponseWriter, r *http.Request) {
 		s.connectFailed(w, r, services, err)
 		return
 	}
+	dsn := conn.ServiceDSN(service)
+	if i := slices.IndexFunc(sandboxes, func(sb dockerpg.Sandbox) bool { return sb.Name == service }); i >= 0 {
+		dsn = sandboxes[i].DSN()
+	}
 
 	// Sessions and the catalog connect when first used. This one proves the
-	// service works now, and reports whether it's set up read-only.
+	// service works now, and reports what it is.
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	c, err := conn.Connect(ctx, service)
+	c, err := conn.Open(ctx, dsn)
 	if err != nil {
 		s.connectFailed(w, r, services, err)
 		return
 	}
 	readOnly := conn.ReadOnly(c)
+	image := dockerpg.Image(c.ParameterStatus("server_version"))
 	_ = c.Close(ctx)
+	settings, err := conn.SettingsFor(dsn)
+	if err != nil {
+		s.connectFailed(w, r, services, err)
+		return
+	}
 
 	connect := func(ctx context.Context) (*pgconn.PgConn, error) {
-		return conn.Connect(ctx, service)
+		return conn.Open(ctx, dsn)
 	}
-	s.Close()
+	s.disconnect()
 	s.mu.Lock()
-	s.service, s.readOnly, s.connect = service, readOnly, connect
+	s.service, s.readOnly, s.connect, s.settings, s.image = service, readOnly, connect, settings, image
 	s.cat = catalog.New(connect)
 	s.mu.Unlock()
 	w.Header().Set("HX-Trigger", "connected") // reloads the tree
 	render(w, r, ConnectStatus(service, readOnly, nil))
+}
+
+// serviceList returns what can be connected to: the services, and any
+// sandboxes after them. Having no Docker just means having no sandboxes.
+func serviceList(ctx context.Context) ([]string, []dockerpg.Sandbox, error) {
+	services, err := conn.Services()
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	sandboxes, _ := dockerpg.Sandboxes(ctx)
+	for _, sb := range sandboxes {
+		services = append(services, sb.Name)
+	}
+	return services, sandboxes, err
 }
 
 // connectFailed reports err, and puts the dropdown back to what's connected.
@@ -177,7 +223,7 @@ func (s *Server) connectFailed(w http.ResponseWriter, r *http.Request, services 
 
 // services lists the service file again, for after it has been edited.
 func (s *Server) services(w http.ResponseWriter, r *http.Request) {
-	services, err := conn.Services()
+	services, _, err := serviceList(r.Context())
 	if err != nil {
 		w.WriteHeader(http.StatusNoContent) // what's listed already will do
 		return
