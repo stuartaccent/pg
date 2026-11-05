@@ -8,10 +8,11 @@ import (
 
 	"pg/internal/catalog"
 	"pg/internal/conn"
+	"pg/internal/dockerpg"
 	"pg/internal/session"
 )
 
-templ Index(services []string, current string, readOnly bool, err error) {
+templ Index(services []string, current string, readOnly bool, j jobView, err error) {
 	<!DOCTYPE html>
 	<html lang="en">
 		<head>
@@ -39,6 +40,10 @@ templ Index(services []string, current string, readOnly bool, err error) {
 						@ConnectStatus(current, readOnly, nil)
 					}
 				</span>
+				<span id="job" class="min-w-0 max-w-md">
+					@JobStatus(j)
+				</span>
+				<button type="button" class="btn btn-ghost btn-sm" onclick="showBackups()">Backups</button>
 				<details class="dropdown dropdown-end">
 					<summary class="btn btn-ghost btn-sm">Config</summary>
 					<ul class="menu dropdown-content z-10 w-48 rounded-box bg-base-200 shadow-md">
@@ -91,6 +96,10 @@ templ Index(services []string, current string, readOnly bool, err error) {
 						<button class="btn btn-warning btn-sm" value="yes">Continue</button>
 					</div>
 				</form>
+			</dialog>
+			<dialog id="backups" class="modal">
+				<div id="backups-body" class="modal-box max-w-3xl"></div>
+				<form method="dialog" class="modal-backdrop"><button aria-label="Close">close</button></form>
 			</dialog>
 			<dialog id="cell" class="modal">
 				<div class="modal-box max-w-3xl">
@@ -175,12 +184,77 @@ templ NewTab(id string) {
 // serviceSelect is swapped as a whole, not by its options: a browser only
 // honours a disabled selected option when parsing a new select.
 templ serviceSelect(services []string, current string) {
-	<select id="service" name="service" class="select select-sm w-auto" hx-get="/services" hx-trigger="focus from:window" hx-target="#service-picker">
+	<select id="service" name="service" class="select select-sm w-auto" hx-get="/services" hx-trigger="focus from:window, services-changed from:body" hx-target="#service-picker">
 		<option value="" disabled selected?={ current == "" }>Choose a service…</option>
 		for _, name := range services {
 			<option value={ name } selected?={ name == current }>{ name }</option>
 		}
 	</select>
+}
+
+// JobStatus shows the job, polling for as long as it's running.
+templ JobStatus(j jobView) {
+	if j.Running {
+		<span class="flex items-center gap-2 text-xs" hx-get="/job" hx-trigger="every 1s" hx-target="#job">
+			<span class="loading loading-spinner loading-xs shrink-0"></span>
+			<span class="truncate" title={ j.Line }>{ j.Label }: { j.Line }</span>
+			<button type="button" class="btn btn-ghost btn-xs shrink-0" hx-post="/job/cancel" hx-swap="none">Stop</button>
+		</span>
+	} else if j.Label != "" {
+		<span class="flex items-center gap-2 text-xs">
+			if j.Err != nil {
+				<span class="truncate text-error" title={ j.Err.Error() }>{ j.Label }: { j.Err.Error() }</span>
+			} else {
+				<span class="truncate text-success" title={ j.Result }>{ j.Result }</span>
+			}
+			<button type="button" class="btn btn-ghost btn-xs shrink-0" aria-label="Dismiss" onclick="this.parentElement.remove()">✕</button>
+		</span>
+	}
+}
+
+// BackupsBody is the Backups dialog's content.
+templ BackupsBody(service, dir string, files []backupFile, sandboxes []dockerpg.Sandbox, err error) {
+	<div class="flex items-center justify-between gap-2">
+		<h3 class="font-medium">Backups</h3>
+		if service != "" {
+			<button type="button" class="btn btn-primary btn-sm" hx-post="/backup" hx-target="#job" onclick="document.querySelector('#backups').close()">Back up { service }</button>
+		} else {
+			<span class="text-base-content/60 text-sm">Connect to a service to back it up.</span>
+		}
+	</div>
+	if err != nil {
+		<p class="text-error mt-2">{ err.Error() }</p>
+	}
+	<button type="button" class="link link-hover text-base-content/60 text-xs mt-1 cursor-pointer" title="Open in Finder. Anything ending .backup here is listed." hx-post="/backups/open" hx-target="#backups-body">{ dir }</button>
+	<ul class="menu menu-sm w-full mt-2 max-h-[40vh] overflow-auto flex-nowrap">
+		if len(files) == 0 {
+			<li class="text-base-content/50 px-2">No backups yet.</li>
+		}
+		for _, f := range files {
+			<li>
+				<div class="flex items-center gap-2">
+					<span class="min-w-0 flex-1 truncate font-mono text-xs" title={ f.Name }>{ f.Name }</span>
+					<span class="text-base-content/50 shrink-0 text-xs">{ f.Size }</span>
+					<button type="button" class="btn btn-soft btn-xs shrink-0" hx-post="/sandboxes" hx-vals={ fmt.Sprintf(`{"file":%q}`, f.Name) } hx-target="#job" onclick="document.querySelector('#backups').close()">Open in sandbox</button>
+				</div>
+			</li>
+		}
+	</ul>
+	if len(sandboxes) > 0 {
+		<h3 class="font-medium mt-4">Sandboxes</h3>
+		<p class="text-base-content/60 text-xs mt-1">Copies of real data, running in Docker until removed. Pick one from the service list to use it.</p>
+		<ul class="menu menu-sm w-full mt-2">
+			for _, sb := range sandboxes {
+				<li>
+					<div class="flex items-center gap-2">
+						<span class="font-mono text-xs shrink-0">{ sb.Name }</span>
+						<span class="min-w-0 flex-1 truncate text-base-content/50 text-xs" title={ sb.Source }>{ sb.Source }</span>
+						<button type="button" class="btn btn-soft btn-error btn-xs shrink-0" hx-post={ "/sandboxes/" + sb.Name + "/remove" } hx-target="#backups-body">Remove</button>
+					</div>
+				</li>
+			}
+		</ul>
+	}
 }
 
 // ConnectFailed is the error, plus the dropdown to swap back in.
@@ -201,6 +275,9 @@ templ ConnectStatus(service string, readOnly bool, err error) {
 		<span class="text-success">Connected to { service }</span>
 		if readOnly {
 			<span class="badge badge-warning badge-sm ml-1">read-only</span>
+		}
+		if dockerpg.IsSandbox(service) {
+			<span class="badge badge-info badge-sm ml-1">sandbox</span>
 		}
 		if path := conn.ExposedPassFile(); path != "" {
 			<span class="badge badge-error badge-sm ml-1" title="Anyone with access to this computer can read your passwords">Password file is readable by others: chmod 600 { path }</span>

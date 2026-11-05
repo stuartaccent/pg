@@ -60,6 +60,8 @@ PGIDE_TEST_SERVICE=local go test -race ./...
 - ⌘/Ctrl+Enter runs the selection, or the whole editor if nothing's selected. So do Explain, Analyze and Export CSV.
 - Autocomplete offers the columns of the tables in the statement under the cursor, wherever it is in the statement.
 - Config opens the service and password files in your text editor, creating them if need be. pg never reads them itself beyond connecting, and new services appear when you come back to it.
+- Backups needs Docker, and runs `pg_dump` from the image matching the server, so nothing has to be installed. Files go in `~/pg-backups`; anything ending `.backup` in there is listed, so older ones can be copied in.
+- Open in sandbox restores a backup into a throwaway container, which then appears in the service list. It's a copy of real data, bound to `127.0.0.1`, and stays in Docker until you remove it in Backups.
 - Click a result cell to read all of it, format JSON and copy it.
 - Export CSV saves to `~/Downloads`, in a read-only transaction: it runs the query again, so one that writes is refused.
 - Tabs' SQL, history, the last service and pane sizes are kept in the webview's `localStorage`, so history holds whatever you've run.
@@ -70,6 +72,7 @@ PGIDE_TEST_SERVICE=local go test -race ./...
 - `cmd/dev` — same handler on localhost for a normal browser
 - `internal/conn` — list services, connect (cancel keeps the connection alive)
 - `internal/session` — one connection, run / page / explain / cancel; each query tab has its own
+- `internal/dockerpg` — `pg_dump` and sandboxes, through Docker
 - `internal/catalog` — its own connection, reads the browser tree, definitions and completions from the system catalogs
 - `web` — HTTP handlers, templ views, vendored htmx 2.0.11
 - `web/css` — Tailwind source and vendored daisyUI, built into `web/static/app.css`

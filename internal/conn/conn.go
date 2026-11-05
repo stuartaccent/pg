@@ -103,13 +103,23 @@ func Services() ([]string, error) {
 	return names, nil
 }
 
+// ServiceDSN returns the connection string for a service.
+func ServiceDSN(service string) string {
+	return "service=" + quote(service)
+}
+
 // Connect opens a connection to the named service.
+func Connect(ctx context.Context, service string) (*pgconn.PgConn, error) {
+	return Open(ctx, ServiceDSN(service))
+}
+
+// Open opens a connection.
 //
 // Cancelling a context passed to a query on the returned connection sends a
 // cancel request to the server, so the running statement stops but the
 // connection survives. (pgconn's default instead drops the connection.)
-func Connect(ctx context.Context, service string) (*pgconn.PgConn, error) {
-	cfg, err := pgconn.ParseConfig("service=" + quote(service))
+func Open(ctx context.Context, dsn string) (*pgconn.PgConn, error) {
+	cfg, err := pgconn.ParseConfig(dsn)
 	if err != nil {
 		return nil, err
 	}
@@ -119,6 +129,24 @@ func Connect(ctx context.Context, service string) (*pgconn.PgConn, error) {
 		return &pgconn.CancelRequestContextWatcherHandler{Conn: c, DeadlineDelay: 3 * time.Second}
 	}
 	return pgconn.ConnectConfig(ctx, cfg)
+}
+
+// Settings are the details of a connection, for handing to another program.
+type Settings struct {
+	Host     string
+	Port     uint16
+	User     string
+	Password string
+	Database string
+}
+
+// SettingsFor resolves dsn, including any service and password files.
+func SettingsFor(dsn string) (Settings, error) {
+	cfg, err := pgconn.ParseConfig(dsn)
+	if err != nil {
+		return Settings{}, err
+	}
+	return Settings{Host: cfg.Host, Port: cfg.Port, User: cfg.User, Password: cfg.Password, Database: cfg.Database}, nil
 }
 
 // ReadOnly reports whether c defaults to read-only transactions, which a

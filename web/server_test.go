@@ -2,12 +2,15 @@ package web
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
 
@@ -210,5 +213,135 @@ func TestExposedPasswordFileWarning(t *testing.T) {
 		if got := strings.Contains(b.String(), "chmod 600 "+path); got != want {
 			t.Errorf("%o: warning shown = %v", mode, got)
 		}
+	}
+}
+
+func TestSandboxOnlyTakesAFileInTheBackupFolder(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	for _, file := range []string{"../../etc/passwd", "/etc/passwd", "missing.backup", "notes.txt", ""} {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/sandboxes", strings.NewReader(url.Values{"file": {file}}.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		s := New()
+		s.Handler().ServeHTTP(w, req)
+		if s.job != nil {
+			t.Errorf("%q started a job", file)
+		}
+		if !strings.Contains(w.Body.String(), "text-error") {
+			t.Errorf("%q: no error shown: %q", file, w.Body.String())
+		}
+	}
+}
+
+func TestRemoveOnlyTakesASandbox(t *testing.T) {
+	if got := get(t, New(), http.MethodPost, "/sandboxes/tools-postgres-1/remove").Code; got != http.StatusNotFound {
+		t.Errorf("status = %d", got)
+	}
+}
+
+func TestBackupNeedsAConnection(t *testing.T) {
+	s := New()
+	if body := get(t, s, http.MethodPost, "/backup").Body.String(); !strings.Contains(body, "connect to a service first") {
+		t.Errorf("body = %q", body)
+	}
+	if s.job != nil {
+		t.Error("started a job")
+	}
+}
+
+func TestOneJobAtATime(t *testing.T) {
+	s := New()
+	release := make(chan struct{})
+	first, err := s.start("first", func(ctx context.Context, progress func(string)) (string, error) {
+		<-release
+		return "done", nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.start("second", func(context.Context, func(string)) (string, error) { return "", nil }); err == nil {
+		t.Error("a second job started")
+	}
+	close(release)
+	for first.view().Running {
+		time.Sleep(time.Millisecond)
+	}
+	if v := first.view(); v.Result != "done" || v.Err != nil {
+		t.Errorf("view = %+v", v)
+	}
+
+	// The first poll after it finishes tells the page, once.
+	if got := get(t, s, http.MethodGet, "/job").Header().Get("HX-Trigger"); got != "services-changed" {
+		t.Errorf("first poll trigger = %q", got)
+	}
+	if got := get(t, s, http.MethodGet, "/job").Header().Get("HX-Trigger"); got != "" {
+		t.Errorf("second poll trigger = %q", got)
+	}
+}
+
+func TestStoppedJobSaysSo(t *testing.T) {
+	s := New()
+	j, err := s.start("slow", func(ctx context.Context, progress func(string)) (string, error) {
+		<-ctx.Done()
+		return "", errors.New("exit status 143")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	get(t, s, http.MethodPost, "/job/cancel")
+	for j.view().Running {
+		time.Sleep(time.Millisecond)
+	}
+	if v := j.view(); v.Err == nil || v.Err.Error() != "stopped" {
+		t.Errorf("err = %v", v.Err)
+	}
+}
+
+func TestSandboxBadge(t *testing.T) {
+	for service, want := range map[string]bool{"pg-sandbox-1a2b": true, "local": false} {
+		var b strings.Builder
+		if err := ConnectStatus(service, false, nil).Render(context.Background(), &b); err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.Contains(b.String(), ">sandbox<"); got != want {
+			t.Errorf("%s: badge shown = %v", service, got)
+		}
+	}
+}
+
+func TestHumanSize(t *testing.T) {
+	for n, want := range map[int64]string{10: "10 B", 2048: "2.0 KB", 33 << 20: "33.0 MB", 5 << 30: "5.0 GB"} {
+		if got := humanSize(n); got != want {
+			t.Errorf("%d: got %q", n, got)
+		}
+	}
+}
+
+func TestOpenBackupsFolder(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	var opened string
+	real := openFolder
+	openFolder = func(path string) error {
+		opened = path
+		return nil
+	}
+	t.Cleanup(func() { openFolder = real })
+
+	if got := get(t, New(), http.MethodPost, "/backups/open").Code; got != http.StatusNoContent {
+		t.Errorf("status = %d", got)
+	}
+	want := filepath.Join(home, "pg-backups")
+	if opened != want {
+		t.Errorf("opened %q, want %q", opened, want)
+	}
+	// It's made if need be, as there'd be nothing to open otherwise.
+	if info, err := os.Stat(want); err != nil || info.Mode().Perm() != 0o700 {
+		t.Errorf("folder: %v, %v", info, err)
+	}
+
+	openFolder = func(string) error { return errors.New("no finder") }
+	if body := get(t, New(), http.MethodPost, "/backups/open").Body.String(); !strings.Contains(body, "no finder") {
+		t.Errorf("failure not shown: %q", body)
 	}
 }
