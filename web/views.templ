@@ -157,7 +157,7 @@ templ TreeNodes(nodes []catalog.Node, err error) {
 	for _, n := range nodes {
 		<li>
 			if n.Kind != "" {
-				<details hx-get={ treeURL(n.Kind, n.ID) } hx-trigger="toggle[target.open && target.querySelector(':scope > ul > li > .loading, :scope > ul > .tree-error') !== null]" hx-target="find ul">
+				<details hx-get={ treeURL(n.Kind, n.ID) } hx-trigger="toggle[target.open && target.querySelectorAll(':scope > ul > li > .loading, :scope > ul > .tree-error').length > 0]" hx-target="find ul">
 					<summary>
 						@treeLabel(n)
 					</summary>
