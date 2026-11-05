@@ -78,7 +78,7 @@ func TestWalk(t *testing.T) {
 	schema := string(res[len(res)-1].Rows[0][0])
 
 	schemaGroups := children(t, c, "schema", schema)
-	if got := labels(schemaGroups); !slices.Equal(got, []string{"Tables", "Views", "Materialized views", "Functions", "Trigger functions", "Sequences"}) {
+	if got := labels(schemaGroups); !slices.Equal(got, []string{"Tables", "Views", "Materialized views", "Functions", "Trigger functions", "Sequences", "Collations", "Domains", "Types"}) {
 		t.Errorf("schema groups = %v", got)
 	}
 	if schemaGroups[0].Detail != "2" || schemaGroups[3].Detail != "1" || schemaGroups[4].Detail != "1" || schemaGroups[0].ID != schema {
@@ -192,6 +192,121 @@ func TestWalk(t *testing.T) {
 	}
 	if _, err := c.Definition(ctx, "view", "0"); err == nil {
 		t.Error("missing object: want an error")
+	}
+}
+
+func TestCollationsDomainsAndTypes(t *testing.T) {
+	c := newTestCatalog(t)
+	children(t, c, RootKind, "") // opens the connection the temp objects live on
+	ctx := context.Background()
+	setup := `
+		create temp table odd_table (id int);
+		create type pg_temp."Odd enum" as enum ('a', 'it''s');
+		create type pg_temp.odd_composite as (id int, label varchar(10));
+		create type pg_temp.odd_range as range (subtype = int4);
+		create domain pg_temp.odd_domain as int default 1 not null constraint positive check (value > 0);
+		create collation pg_temp.odd_collation (provider = libc, locale = 'C');
+		select pg_my_temp_schema()::regnamespace::text`
+	res, err := c.conn.Exec(ctx, setup).ReadAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema := string(res[len(res)-1].Rows[0][0])
+
+	groups := children(t, c, "schema", schema)
+	details := map[string]string{}
+	for _, g := range groups {
+		details[g.Label] = g.Detail
+	}
+	if details["Collations"] != "1" || details["Domains"] != "1" || details["Types"] != "3" {
+		t.Errorf("group counts = %v", details)
+	}
+
+	// Just these: no arrays, no multirange, no row type for the table, no domain.
+	types := children(t, c, "types", schema)
+	if got := labels(types); !slices.Equal(got, []string{"Odd enum", "odd_composite", "odd_range"}) {
+		t.Fatalf("types = %v", got)
+	}
+	if types[0].Detail != "enum" || types[1].Detail != "composite" || types[2].Detail != "range" {
+		t.Errorf("type details = %+v", types)
+	}
+	domains := children(t, c, "domains", schema)
+	if len(domains) != 1 || domains[0].Detail != "integer" {
+		t.Fatalf("domains = %+v", domains)
+	}
+	collations := children(t, c, "collations", schema)
+	if len(collations) != 1 || collations[0].Detail != "libc" {
+		t.Fatalf("collations = %+v", collations)
+	}
+
+	// Each definition must be SQL that Postgres accepts.
+	nodes := append(append(types, domains...), collations...)
+	var script strings.Builder
+	script.WriteString("begin; create schema defcheck; ")
+	for _, n := range nodes {
+		def, err := c.Definition(ctx, n.Def, n.ID)
+		if err != nil {
+			t.Fatalf("%s: %v", n.Label, err)
+		}
+		script.WriteString(strings.ReplaceAll(def, schema+".", "defcheck.") + "\n")
+	}
+	if _, err := c.conn.Exec(ctx, script.String()).ReadAll(); err != nil {
+		t.Errorf("definitions don't run: %v\n%s", err, script.String())
+	}
+	if _, err := c.conn.Exec(ctx, "rollback").ReadAll(); err != nil {
+		t.Fatal(err)
+	}
+
+	def, err := c.Definition(ctx, domains[0].Def, domains[0].ID)
+	for _, want := range []string{"default 1", "not null", "constraint positive CHECK"} {
+		if err != nil || !strings.Contains(def, want) {
+			t.Errorf("domain definition lacks %q: %q, %v", want, def, err)
+		}
+	}
+	if def, err := c.Definition(ctx, types[0].Def, types[0].ID); err != nil || !strings.Contains(def, `'it''s'`) {
+		t.Errorf("enum definition = %q, %v", def, err)
+	}
+
+	// A base type can't be created here, but its definition can be read.
+	int4, err := c.conn.Exec(ctx, "select 'int4'::regtype::oid").ReadAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if def, err := c.Definition(ctx, "type", string(int4[0].Rows[0][0])); err != nil || !strings.Contains(def, "input = int4in") || !strings.Contains(def, "internallength = 4") {
+		t.Errorf("base type definition = %q, %v", def, err)
+	}
+}
+
+func TestICUCollationDefinition(t *testing.T) {
+	c := newTestCatalog(t)
+	children(t, c, RootKind, "") // opens the connection the temp objects live on
+	ctx := context.Background()
+	res, err := c.conn.Exec(ctx, `
+		create collation pg_temp.odd_icu (provider = icu, locale = 'und', deterministic = false);
+		select pg_my_temp_schema()::regnamespace::text`).ReadAll()
+	if err != nil {
+		t.Skipf("server has no ICU: %v", err)
+	}
+	schema := string(res[len(res)-1].Rows[0][0])
+	node := children(t, c, "collations", schema)[0]
+	if node.Detail != "icu" {
+		t.Errorf("provider = %q", node.Detail)
+	}
+	def, err := c.Definition(ctx, node.Def, node.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"provider = icu", "locale = 'und'", "deterministic = false"} {
+		if !strings.Contains(def, want) {
+			t.Errorf("definition lacks %q: %s", want, def)
+		}
+	}
+	rerun := "begin; create schema defcheck; " + strings.ReplaceAll(def, schema+".", "defcheck.")
+	if _, err := c.conn.Exec(ctx, rerun).ReadAll(); err != nil {
+		t.Errorf("definition doesn't run: %v\n%s", err, def)
+	}
+	if _, err := c.conn.Exec(ctx, "rollback").ReadAll(); err != nil {
+		t.Fatal(err)
 	}
 }
 

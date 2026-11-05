@@ -71,6 +71,21 @@ const (
 	// triggerFunction is true of the functions pgAdmin groups separately, as
 	// they're only ever called by triggers. p is pg_proc.
 	triggerFunction = `p.prorettype in ('trigger'::regtype, 'event_trigger'::regtype)`
+	// ownType hides what Postgres makes by itself alongside other objects (the
+	// array, multirange and row types of tables), domains, which are listed
+	// apart, and types from extensions. t is pg_type.
+	ownType = `t.typtype not in ('d', 'm', 'p') and t.typcategory <> 'A'
+		and (t.typrelid = 0 or exists (select 1 from pg_class r where r.oid = t.typrelid and r.relkind = 'c'))
+		and not ` + extensionType
+	// ownDomain is the domains not from an extension. t is pg_type.
+	ownDomain     = `t.typtype = 'd' and not ` + extensionType
+	extensionType = `exists (select 1 from pg_depend d
+		where d.classid = 'pg_type'::regclass and d.objid = t.oid and d.deptype = 'e')`
+	// ownCollation hides collations from extensions. l is pg_collation.
+	ownCollation = `not exists (select 1 from pg_depend d
+		where d.classid = 'pg_collation'::regclass and d.objid = l.oid and d.deptype = 'e')`
+	typeKind          = `case t.typtype when 'e' then 'enum' when 'c' then 'composite' when 'r' then 'range' else 'base' end`
+	collationProvider = `case l.collprovider when 'i' then 'icu' when 'c' then 'libc' else 'default' end`
 	// selectFrom is a query for the rows of relation c in schema n. Postgres
 	// does the identifier quoting, via format's %I.
 	selectFrom = `format('select * from %I.%I limit 100;', n.nspname, c.relname)`
@@ -123,7 +138,10 @@ var queries = map[string]string{
 			(3, 'Materialized views', 'matviews', (select count(*) from pg_class c where c.relnamespace = n.oid and c.relkind = 'm')),
 			(4, 'Functions', 'functions', (select count(*) from pg_proc p where p.pronamespace = n.oid and ` + ownFunction + ` and not ` + triggerFunction + `)),
 			(5, 'Trigger functions', 'triggerfunctions', (select count(*) from pg_proc p where p.pronamespace = n.oid and ` + ownFunction + ` and ` + triggerFunction + `)),
-			(6, 'Sequences', 'sequences', (select count(*) from pg_class c where c.relnamespace = n.oid and c.relkind = 'S'))
+			(6, 'Sequences', 'sequences', (select count(*) from pg_class c where c.relnamespace = n.oid and c.relkind = 'S')),
+			(7, 'Collations', 'collations', (select count(*) from pg_collation l where l.collnamespace = n.oid and ` + ownCollation + `)),
+			(8, 'Domains', 'domains', (select count(*) from pg_type t where t.typnamespace = n.oid and ` + ownDomain + `)),
+			(9, 'Types', 'types', (select count(*) from pg_type t where t.typnamespace = n.oid and ` + ownType + `))
 		) g(ord, label, kind, total)
 		where n.nspname = $1
 		order by g.ord`,
@@ -141,6 +159,24 @@ var queries = map[string]string{
 		order by 1`,
 	"functions":        functions(`not `+triggerFunction, `pg_get_function_result(p.oid)`),
 	"triggerfunctions": functions(triggerFunction, `''`),
+	"collations": `
+		select l.collname, ` + collationProvider + `, '', '', l.oid::text, 'collation'
+		from pg_collation l
+		join pg_namespace n on n.oid = l.collnamespace
+		where n.nspname = $1 and ` + ownCollation + `
+		order by 1`,
+	"domains": `
+		select t.typname, format_type(t.typbasetype, t.typtypmod), '', '', t.oid::text, 'domain'
+		from pg_type t
+		join pg_namespace n on n.oid = t.typnamespace
+		where n.nspname = $1 and ` + ownDomain + `
+		order by 1`,
+	"types": `
+		select t.typname, ` + typeKind + `, '', '', t.oid::text, 'type'
+		from pg_type t
+		join pg_namespace n on n.oid = t.typnamespace
+		where n.nspname = $1 and ` + ownType + `
+		order by 1`,
 	"columns": `
 		select attname,
 			format_type(atttypid, atttypmod) || case when attnotnull then ' not null' else '' end,
@@ -183,6 +219,19 @@ var queries = map[string]string{
 			join pg_namespace n on n.oid = p.pronamespace
 			where ` + ownFunction + ` and ` + userSchema + `
 				and position(lower($1) in lower(p.proname)) > 0
+			union all
+			select l.collname, n.nspname::text, '', '', l.oid::text, 'collation'
+			from pg_collation l
+			join pg_namespace n on n.oid = l.collnamespace
+			where ` + ownCollation + ` and ` + userSchema + `
+				and position(lower($1) in lower(l.collname)) > 0
+			union all
+			select t.typname, n.nspname::text, '', '', t.oid::text,
+				case t.typtype when 'd' then 'domain' else 'type' end
+			from pg_type t
+			join pg_namespace n on n.oid = t.typnamespace
+			where (` + ownDomain + ` or ` + ownType + `) and ` + userSchema + `
+				and position(lower($1) in lower(t.typname)) > 0
 		) found
 		order by 1, 2
 		limit 200`,
@@ -209,6 +258,47 @@ var definitions = map[string]string{
 		join pg_class c on c.oid = s.seqrelid
 		join pg_namespace n on n.oid = c.relnamespace
 		where s.seqrelid = $1`,
+	// The ICU locale's column has been renamed between versions, hence to_jsonb.
+	"collation": `
+		select format('create collation %I.%I (provider = %s, locale = %L%s);', n.nspname, l.collname,
+			` + collationProvider + `,
+			coalesce(to_jsonb(l) ->> 'colllocale', to_jsonb(l) ->> 'colliculocale', l.collcollate),
+			case when l.collisdeterministic then '' else ', deterministic = false' end)
+		from pg_collation l
+		join pg_namespace n on n.oid = l.collnamespace
+		where l.oid = $1`,
+	"domain": `
+		select format('create domain %I.%I as %s%s%s%s;', n.nspname, t.typname,
+			format_type(t.typbasetype, t.typtypmod),
+			case when t.typdefault is not null then ' default ' || t.typdefault else '' end,
+			case when t.typnotnull then ' not null' else '' end,
+			coalesce((
+				select string_agg(format(E'\n    constraint %I %s', k.conname, pg_get_constraintdef(k.oid)), '' order by k.conname)
+				from pg_constraint k
+				where k.contypid = t.oid and k.contype <> 'n'), ''))
+		from pg_type t
+		join pg_namespace n on n.oid = t.typnamespace
+		where t.oid = $1`,
+	"type": `
+		select case t.typtype
+			when 'e' then format(E'create type %I.%I as enum (\n%s\n);', n.nspname, t.typname, (
+				select string_agg('    ' || quote_literal(e.enumlabel), E',\n' order by e.enumsortorder)
+				from pg_enum e
+				where e.enumtypid = t.oid))
+			when 'c' then format(E'create type %I.%I as (\n%s\n);', n.nspname, t.typname, (
+				select string_agg(format('    %I %s', a.attname, format_type(a.atttypid, a.atttypmod)), E',\n' order by a.attnum)
+				from pg_attribute a
+				where a.attrelid = t.typrelid and a.attnum > 0 and not a.attisdropped))
+			when 'r' then format('create type %I.%I as range (subtype = %s%s);', n.nspname, t.typname,
+				format_type(g.rngsubtype, null),
+				case when g.rngsubdiff <> 0 then ', subtype_diff = ' || g.rngsubdiff::regproc else '' end)
+			else format('create type %I.%I (input = %s, output = %s, internallength = %s);', n.nspname, t.typname,
+				t.typinput, t.typoutput, case when t.typlen < 0 then 'variable' else t.typlen::text end)
+			end
+		from pg_type t
+		join pg_namespace n on n.oid = t.typnamespace
+		left join pg_range g on g.rngtypid = t.oid
+		where t.oid = $1`,
 	// Postgres has no pg_get_tabledef, so this one is put together by hand.
 	// shortcut: leaves out inheritance, storage options and grants, which its
 	// first line says. Use pg_dump's output if those ever matter here.
