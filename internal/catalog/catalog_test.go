@@ -67,6 +67,8 @@ func TestWalk(t *testing.T) {
 		create temp table parted (id int) partition by range (id);
 		create temp table parted_low partition of parted for values from (1) to (10);
 		create temp view odd_view as select 1 as one;
+		create function pg_temp.odd_function() returns int language sql as 'select 1';
+		create function pg_temp.odd_trigger_function() returns trigger language plpgsql as 'begin return new; end';
 		create temp sequence odd_seq;
 		select pg_my_temp_schema()::regnamespace::text`
 	res, err := c.conn.Exec(context.Background(), setup).ReadAll()
@@ -76,10 +78,10 @@ func TestWalk(t *testing.T) {
 	schema := string(res[len(res)-1].Rows[0][0])
 
 	schemaGroups := children(t, c, "schema", schema)
-	if got := labels(schemaGroups); !slices.Equal(got, []string{"Tables", "Views", "Materialized views", "Functions", "Sequences"}) {
+	if got := labels(schemaGroups); !slices.Equal(got, []string{"Tables", "Views", "Materialized views", "Functions", "Trigger functions", "Sequences"}) {
 		t.Errorf("schema groups = %v", got)
 	}
-	if schemaGroups[0].Detail != "2" || schemaGroups[3].Detail != "0" || schemaGroups[0].ID != schema {
+	if schemaGroups[0].Detail != "2" || schemaGroups[3].Detail != "1" || schemaGroups[4].Detail != "1" || schemaGroups[0].ID != schema {
 		t.Errorf("schema group details = %+v", schemaGroups)
 	}
 
@@ -144,8 +146,15 @@ func TestWalk(t *testing.T) {
 	if s := children(t, c, "sequences", schema); len(s) != 1 || s[0].Kind != "" || s[0].SQL == "" {
 		t.Errorf("sequences = %+v", s)
 	}
-	if f := children(t, c, "functions", schema); len(f) != 0 {
+	if f := children(t, c, "functions", schema); len(f) != 1 || f[0].Label != "odd_function()" || f[0].Detail != "integer" {
 		t.Errorf("functions = %+v", f)
+	}
+	f := children(t, c, "triggerfunctions", schema)
+	if len(f) != 1 || f[0].Label != "odd_trigger_function()" || f[0].Detail != "" {
+		t.Fatalf("trigger functions = %+v", f)
+	}
+	if def, err := c.Definition(context.Background(), f[0].Def, f[0].ID); err != nil || !strings.Contains(def, "RETURNS trigger") {
+		t.Errorf("trigger function definition = %q, %v", def, err)
 	}
 
 	// Each definition must be SQL that Postgres accepts. Run them in a rolled

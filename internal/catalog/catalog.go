@@ -68,6 +68,9 @@ const (
 	ownFunction = `p.prokind in ('f', 'p') and not exists (
 		select 1 from pg_depend d
 		where d.classid = 'pg_proc'::regclass and d.objid = p.oid and d.deptype = 'e')`
+	// triggerFunction is true of the functions pgAdmin groups separately, as
+	// they're only ever called by triggers. p is pg_proc.
+	triggerFunction = `p.prorettype in ('trigger'::regtype, 'event_trigger'::regtype)`
 	// selectFrom is a query for the rows of relation c in schema n. Postgres
 	// does the identifier quoting, via format's %I.
 	selectFrom = `format('select * from %I.%I limit 100;', n.nspname, c.relname)`
@@ -90,6 +93,18 @@ func relations(filter, kind, def string) string {
 		order by 1`
 }
 
+// functions lists a schema's functions matching filter, with detail as the SQL
+// for what to show beside each.
+func functions(filter, detail string) string {
+	return `
+		select p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')',
+			` + detail + `, '', '', p.oid::text, 'function'
+		from pg_proc p
+		join pg_namespace n on n.oid = p.pronamespace
+		where n.nspname = $1 and ` + ownFunction + ` and ` + filter + `
+		order by 1`
+}
+
 // queries return one row per node: label, detail, sql, kind, id, def. A kind's
 // id, if it has one, is bound as $1: a schema name, a relation's oid or a
 // search term.
@@ -106,8 +121,9 @@ var queries = map[string]string{
 			(1, 'Tables', 'tables', (select count(*) from pg_class c where c.relnamespace = n.oid and c.relkind in ('r', 'p') and not c.relispartition)),
 			(2, 'Views', 'views', (select count(*) from pg_class c where c.relnamespace = n.oid and c.relkind = 'v')),
 			(3, 'Materialized views', 'matviews', (select count(*) from pg_class c where c.relnamespace = n.oid and c.relkind = 'm')),
-			(4, 'Functions', 'functions', (select count(*) from pg_proc p where p.pronamespace = n.oid and ` + ownFunction + `)),
-			(5, 'Sequences', 'sequences', (select count(*) from pg_class c where c.relnamespace = n.oid and c.relkind = 'S'))
+			(4, 'Functions', 'functions', (select count(*) from pg_proc p where p.pronamespace = n.oid and ` + ownFunction + ` and not ` + triggerFunction + `)),
+			(5, 'Trigger functions', 'triggerfunctions', (select count(*) from pg_proc p where p.pronamespace = n.oid and ` + ownFunction + ` and ` + triggerFunction + `)),
+			(6, 'Sequences', 'sequences', (select count(*) from pg_class c where c.relnamespace = n.oid and c.relkind = 'S'))
 		) g(ord, label, kind, total)
 		where n.nspname = $1
 		order by g.ord`,
@@ -123,13 +139,8 @@ var queries = map[string]string{
 		join pg_namespace n on n.oid = c.relnamespace
 		where i.inhparent = $1
 		order by 1`,
-	"functions": `
-		select p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')',
-			pg_get_function_result(p.oid), '', '', p.oid::text, 'function'
-		from pg_proc p
-		join pg_namespace n on n.oid = p.pronamespace
-		where n.nspname = $1 and ` + ownFunction + `
-		order by 1`,
+	"functions":        functions(`not `+triggerFunction, `pg_get_function_result(p.oid)`),
+	"triggerfunctions": functions(triggerFunction, `''`),
 	"columns": `
 		select attname,
 			format_type(atttypid, atttypmod) || case when attnotnull then ' not null' else '' end,
