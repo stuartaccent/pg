@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1d232a"/>
+      <stop offset="1" stop-color="#191e24"/>
+    </linearGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff" stop-opacity=".07"/>
+      <stop offset=".5" stop-color="#fff" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="125%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="14"/>
+      <feOffset dy="12"/>
+      <feComponentTransfer><feFuncA type="linear" slope=".35"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <g filter="url(#shadow)">
+    <rect x="100" y="100" width="824" height="824" rx="186" fill="url(#body)"/>
+    <rect x="100" y="100" width="824" height="824" rx="186" fill="url(#sheen)"/>
+  </g>
+  <path fill="#ecf9ff" d="M296.1 567.1V725.2H217V306.6H296.1V352.1Q308.5 325.8 328.8 312.6Q349.1 299.3 376.5 299.3Q428.5 299.3 457.2 341Q485.9 382.7 485.9 458.5Q485.9 535.4 456.8 576.6Q427.7 617.7 373.8 617.7Q349.4 617.7 330 605.1Q310.7 592.6 296.1 567.1ZM406.5 458Q406.5 414.1 391.9 389.2Q377.3 364.3 351.6 364.3Q325.8 364.3 311 389.2Q296.1 414.1 296.1 458Q296.1 501.8 311 526.8Q325.8 551.7 351.6 551.7Q377.3 551.7 391.9 526.8Q406.5 501.8 406.5 458Z M727.7 453.4Q727.7 412.8 712.2 388.3Q696.8 363.8 671.6 363.8Q646.7 363.8 631.4 388.1Q616.1 412.5 616.1 453.4Q616.1 494.5 631.4 518.9Q646.7 543.3 671.6 543.3Q696.8 543.3 712.2 518.8Q727.7 494.3 727.7 453.4ZM807 587.1Q807 660 774.1 692.3Q741.2 724.7 667.3 724.7Q642.4 724.7 618 721Q593.6 717.4 568.5 709.8V637Q590.9 649.4 614.2 655.4Q637.5 661.3 662.1 661.3Q695.7 661.3 711.7 645.5Q727.7 629.6 727.7 596.1V563.3Q716 585 696.8 595.5Q677.6 606.1 650 606.1Q598 606.1 567.4 565.5Q536.8 524.9 536.8 455.3Q536.8 383.3 567.4 341Q598 298.8 649.4 298.8Q675.4 298.8 695.7 311Q716 323.1 727.7 345.3V306.6H807Z"/>
+</svg>
