@@ -11,6 +11,7 @@ const views = new Map(); // tab id to its editor
 const language = new Compartment();
 let schema = {};
 let activeTab;
+const MIN_PANE = 80; // the smallest a dragged pane gets; what's beside it keeps twice this, as it holds the buttons too
 
 const sqlLanguage = () => sql({ dialect: PostgreSQL, schema, defaultSchema: "public" });
 
@@ -117,6 +118,46 @@ function resetTree() {
 	document.querySelector("#tree-search").value = "";
 	loadSchema();
 }
+
+// Drag bars, rather than CSS resize: WebKit's corner handle can't be relied on
+// with an editor filling the box. Each sizes the element just before it.
+function resize(bar, size) {
+	const box = bar.previousElementSibling;
+	const prop = bar.dataset.resize;
+	const room = prop === "height" ? box.parentElement.clientHeight : box.parentElement.clientWidth;
+	box.style[prop] = `${Math.max(MIN_PANE, Math.min(size, room - 2 * MIN_PANE))}px`;
+}
+
+function sizeOf(bar) {
+	return bar.previousElementSibling.getBoundingClientRect()[bar.dataset.resize];
+}
+
+document.addEventListener("pointerdown", (event) => {
+	const bar = event.target.closest("[data-resize]");
+	if (!bar) return;
+	event.preventDefault();
+	bar.focus();
+	const axis = bar.dataset.resize === "height" ? "clientY" : "clientX";
+	const start = event[axis];
+	const startSize = sizeOf(bar);
+	const move = (e) => resize(bar, startSize + e[axis] - start);
+	const stop = () => {
+		window.removeEventListener("pointermove", move);
+		window.removeEventListener("pointerup", stop);
+		window.removeEventListener("pointercancel", stop);
+	};
+	window.addEventListener("pointermove", move);
+	window.addEventListener("pointerup", stop);
+	window.addEventListener("pointercancel", stop);
+});
+
+document.addEventListener("keydown", (event) => {
+	const bar = event.target.closest?.("[data-resize]");
+	const step = { ArrowDown: 20, ArrowRight: 20, ArrowUp: -20, ArrowLeft: -20 }[event.key];
+	if (!bar || !step) return;
+	event.preventDefault();
+	resize(bar, sizeOf(bar) + step);
+});
 
 Object.assign(window, { selectTab, closeTab, useSQL, useDefinition, resetTree });
 
