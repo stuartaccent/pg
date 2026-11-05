@@ -10,6 +10,8 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"sync"
@@ -51,6 +53,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /query", s.query)
 	mux.HandleFunc("GET /query/{id}/more", s.more)
 	mux.HandleFunc("POST /cancel", s.cancel)
+	mux.HandleFunc("POST /export", s.export)
 	mux.HandleFunc("GET /tree", s.tree)
 	mux.HandleFunc("GET /definition", s.definition)
 	mux.HandleFunc("GET /completions", s.completions)
@@ -221,6 +224,58 @@ func (s *Server) cancel(w http.ResponseWriter, r *http.Request) {
 		sess.Cancel()
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) export(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	connect := s.connect
+	s.mu.Unlock()
+	if connect == nil {
+		render(w, r, ExportStatus("", 0, errors.New("connect to a service first")))
+		return
+	}
+	path, rows, err := saveCSV(r.Context(), connect, r.FormValue("sql"))
+	render(w, r, ExportStatus(path, rows, err))
+}
+
+// saveCSV writes query's rows to a new file in ~/Downloads, on a connection of
+// its own so the tab's result isn't disturbed. Going straight to a file keeps
+// large results out of memory, and webviews needn't support downloads.
+//
+// shortcut: Cancel doesn't reach an export, only leaving the page does. Share
+// the session's cancel if long exports turn out to need stopping.
+func saveCSV(ctx context.Context, connect func(context.Context) (*pgconn.PgConn, error), query string) (string, int64, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", 0, err
+	}
+	dir := filepath.Join(home, "Downloads")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", 0, err
+	}
+	c, err := connect(ctx)
+	if err != nil {
+		return "", 0, err
+	}
+	defer func() {
+		closing, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = c.Close(closing)
+	}()
+
+	f, err := os.CreateTemp(dir, "pg-export-*.csv")
+	if err != nil {
+		return "", 0, err
+	}
+	rows, err := conn.Export(ctx, c, query, f)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		_ = os.Remove(f.Name()) // half an export is worse than none
+		return "", 0, err
+	}
+	return f.Name(), rows, nil
 }
 
 func (s *Server) tree(w http.ResponseWriter, r *http.Request) {

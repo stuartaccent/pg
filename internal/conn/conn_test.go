@@ -1,10 +1,12 @@
 package conn
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgservicefile"
@@ -56,5 +58,50 @@ func TestReadOnly(t *testing.T) {
 			t.Errorf("%s: writing gave err = %v", name, err)
 		}
 		_ = c.Close(context.Background())
+	}
+}
+
+func TestExport(t *testing.T) {
+	service := os.Getenv("PGIDE_TEST_SERVICE")
+	if service == "" {
+		t.Skip("PGIDE_TEST_SERVICE not set")
+	}
+	ctx := context.Background()
+	tests := []struct {
+		name, query, want string
+		wantRows          int64
+		wantErr           string
+	}{
+		{name: "select", query: "select 1 as a, 'x,y' as b", want: "a,b\n1,\"x,y\"\n", wantRows: 1},
+		{name: "trailing semicolon", query: "select 1 as a;\n", want: "a\n1\n", wantRows: 1},
+		{name: "trailing comment", query: "select 1 as a -- note", want: "a\n1\n", wantRows: 1},
+		{name: "null", query: "select null::int as a", want: "a\n\n", wantRows: 1},
+		{name: "semicolon then comment", query: "select 1 as a; -- note\n-- another\n", want: "a\n1\n", wantRows: 1},
+		{name: "bad sql", query: "select nope", wantErr: "nope"},
+		// where false, so this changes nothing even if the guard were to fail.
+		{name: "a write is refused", query: "update pg_description set description = description where false returning 1", wantErr: "read-only"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, err := Connect(ctx, service)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer c.Close(ctx)
+			var out bytes.Buffer
+			rows, err := Export(ctx, c, tt.query, &out)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("err = %v, want %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if out.String() != tt.want || rows != tt.wantRows {
+				t.Errorf("got %q, %d rows", out.String(), rows)
+			}
+		})
 	}
 }

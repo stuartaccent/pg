@@ -6,12 +6,14 @@ import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { Compartment, Prec } from "@codemirror/state";
 import { keymap, placeholder } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
+import { formatDialect, postgresql } from "sql-formatter";
 import { writesEveryRow } from "./risky.mjs";
 
 const views = new Map(); // tab id to its editor
 const language = new Compartment();
 let completions = {};
 let activeTab;
+const MAX_HISTORY = 200;
 const MIN_PANE = 80; // the smallest a dragged pane gets; what's beside it keeps twice this, as it holds the buttons too
 
 const sqlLanguage = () => sql({ dialect: PostgreSQL, schema: completions.schemas ?? {}, defaultSchema: completions.defaultSchema || undefined });
@@ -46,7 +48,10 @@ function mount(panel) {
 	const view = new EditorView({
 		parent: textarea.form,
 		extensions: [
-			Prec.highest(keymap.of([{ key: "Mod-Enter", run: () => (textarea.form.requestSubmit(), true) }])),
+			Prec.highest(keymap.of([
+				{ key: "Mod-Enter", run: () => (textarea.form.requestSubmit(), true) },
+				{ key: "Mod-Shift-f", run: () => (formatSQL(), true) },
+			])),
 			basicSetup,
 			language.of(sqlLanguage()),
 			theme,
@@ -109,6 +114,7 @@ const newTab = async () => {
 // with a single empty tab from the server.
 async function restoreTabs() {
 	mountNewPanels();
+	restoreSizes();
 	const first = activeTab;
 	const saved = JSON.parse(localStorage.getItem("tabs") ?? "[]").filter(Boolean);
 	for (const [i, text] of saved.entries()) {
@@ -131,6 +137,94 @@ async function openSQL(text) {
 	const view = views.get(activeTab);
 	setText(view, text);
 	view.focus();
+}
+
+// sqlToRun is what a tab's buttons act on: the selection if there is one.
+function sqlToRun(elt) {
+	const { state } = views.get(elt.closest("[data-tab]").dataset.tab);
+	const { from, to, empty } = state.selection.main;
+	return empty ? state.doc.toString() : state.sliceDoc(from, to);
+}
+
+function formatSQL() {
+	const view = views.get(activeTab);
+	const notice = document.querySelector(`#notice-${activeTab}`);
+	notice.textContent = "";
+	try {
+		setText(view, formatDialect(view.state.doc.toString(), { dialect: postgresql, keywordCase: "lower" }));
+	} catch (error) {
+		notice.textContent = `Could not format: ${error.message}`;
+	}
+}
+
+const loadHistory = () => JSON.parse(localStorage.getItem("history") ?? "[]");
+
+function remember(sql) {
+	const history = loadHistory().filter((entry) => entry !== sql);
+	history.unshift(sql);
+	localStorage.setItem("history", JSON.stringify(history.slice(0, MAX_HISTORY)));
+}
+
+function renderHistory() {
+	const term = document.querySelector("#history-search").value.toLowerCase();
+	const list = document.querySelector("#history-list");
+	list.replaceChildren(...loadHistory().filter((sql) => sql.toLowerCase().includes(term)).map((sql) => {
+		const item = document.createElement("li");
+		const button = document.createElement("button");
+		button.type = "button";
+		button.className = "font-mono text-xs block truncate";
+		button.textContent = button.title = sql;
+		button.onclick = () => {
+			document.querySelector("#history").close();
+			openSQL(sql);
+		};
+		item.append(button);
+		return item;
+	}));
+}
+
+function showHistory() {
+	document.querySelector("#history-search").value = "";
+	renderHistory();
+	document.querySelector("#history").showModal();
+}
+
+let openCell;
+
+function showCell(td) {
+	openCell = td;
+	const text = td.hasAttribute("data-null") ? "NULL" : td.textContent;
+	let shown = text;
+	if (/^\s*[{[]/.test(text)) {
+		try {
+			shown = JSON.stringify(JSON.parse(text), null, 2);
+		} catch {
+			// Not JSON after all: show it as it is.
+		}
+	}
+	document.querySelector("#cell-text").textContent = shown;
+	document.querySelector("#cell").showModal();
+}
+
+const cellValue = (td) => (td.hasAttribute("data-null") ? "" : td.textContent);
+
+async function copyCell(button, wholeRow) {
+	const text = wholeRow ? [...openCell.parentElement.cells].map(cellValue).join("\t") : cellValue(openCell);
+	let copied = true;
+	try {
+		await navigator.clipboard.writeText(text);
+	} catch {
+		// The clipboard API needs a secure context, which a webview's scheme may not count as.
+		const scratch = document.createElement("textarea");
+		scratch.value = text;
+		button.closest("dialog").append(scratch);
+		scratch.select();
+		copied = document.execCommand("copy");
+		scratch.remove();
+	}
+	const label = button.textContent;
+	button.textContent = copied ? "Copied" : "Copy failed";
+	setTimeout(() => (button.textContent = label), 1000);
 }
 
 // Tree buttons sit inside a <summary>: preventDefault stops them also toggling it.
@@ -158,12 +252,24 @@ function resetTree() {
 }
 
 // Drag bars, rather than CSS resize: WebKit's corner handle can't be relied on
-// with an editor filling the box. Each sizes the element just before it.
+// with an editor filling the box. Each sizes the element just before it, by a
+// variable so that all the tabs' editors stay the same height.
+const sizeVars = { height: "--editor-height", width: "--sidebar-width" };
+
 function resize(bar, size) {
 	const box = bar.previousElementSibling;
 	const prop = bar.dataset.resize;
 	const room = prop === "height" ? box.parentElement.clientHeight : box.parentElement.clientWidth;
-	box.style[prop] = `${Math.max(MIN_PANE, Math.min(size, room - 2 * MIN_PANE))}px`;
+	const px = Math.max(MIN_PANE, Math.min(size, room - 2 * MIN_PANE));
+	document.documentElement.style.setProperty(sizeVars[prop], `${px}px`);
+	localStorage.setItem(sizeVars[prop], px);
+}
+
+function restoreSizes() {
+	for (const bar of document.querySelectorAll("[data-resize]")) {
+		const saved = Number(localStorage.getItem(sizeVars[bar.dataset.resize]));
+		if (saved) resize(bar, saved);
+	}
 }
 
 function sizeOf(bar) {
@@ -197,14 +303,44 @@ document.addEventListener("keydown", (event) => {
 	resize(bar, sizeOf(bar) + step);
 });
 
-Object.assign(window, { selectTab, closeTab, useSQL, useDefinition, resetTree });
+Object.assign(window, { selectTab, closeTab, useSQL, useDefinition, resetTree, formatSQL, showHistory, renderHistory, copyCell });
+
+document.addEventListener("click", (event) => {
+	const td = event.target.closest?.(".results tr[data-row] td");
+	if (td && getSelection().isCollapsed) showCell(td);
+});
+
+// Sends the selection rather than the whole editor, and remembers what ran.
+document.addEventListener("htmx:configRequest", (event) => {
+	const { elt, formData, path } = event.detail;
+	if (!formData.has("sql")) return;
+	const sql = sqlToRun(elt);
+	formData.set("sql", sql);
+	if (path === "/query" && sql.trim()) remember(sql.trim());
+});
+
+// Counts up beside Running…, to tell a slow query from a stuck one.
+document.addEventListener("htmx:beforeSend", (event) => {
+	const { elt } = event.detail;
+	const timer = elt.closest?.("[data-tab]")?.querySelector(".timer");
+	if (!timer || !event.detail.requestConfig.formData?.has("sql")) return;
+	clearInterval(timer.interval);
+	const start = performance.now();
+	timer.textContent = "";
+	timer.interval = setInterval(() => (timer.textContent = `${((performance.now() - start) / 1000).toFixed(1)}s`), 100);
+});
+
+document.addEventListener("htmx:afterRequest", (event) => {
+	const timer = event.detail.elt.closest?.("[data-tab]")?.querySelector(".timer");
+	if (timer) clearInterval(timer.interval);
+});
 
 // Runs before htmx sends a query, for the ones worth a second thought.
 document.addEventListener("htmx:confirm", (event) => {
 	const { elt, triggeringEvent } = event.detail;
 	if (!elt.matches("form[hx-post='/query']")) return;
 	const mode = triggeringEvent?.submitter?.value;
-	const sql = elt.querySelector("textarea").value;
+	const sql = sqlToRun(elt);
 	let warning;
 	if (mode === "analyze") {
 		warning = "Analyze really runs this query to time it. Changes are rolled back, but it takes as long as the query, and anything outside the transaction, such as sequences, stays changed.";
@@ -220,5 +356,18 @@ htmx.onLoad(mountNewPanels);
 document.addEventListener("DOMContentLoaded", () => {
 	restoreTabs();
 	loadSchema();
+	reconnect();
 });
-document.addEventListener("connected", resetTree);
+document.addEventListener("connected", () => {
+	localStorage.setItem("service", document.querySelector("select[name=service]").value);
+	resetTree();
+});
+
+// Picks up the last service, unless it has gone from the service file.
+function reconnect() {
+	const select = document.querySelector("select[name=service]");
+	const saved = localStorage.getItem("service");
+	if (select.value || ![...select.options].some((option) => option.value === saved)) return;
+	select.value = saved;
+	select.dispatchEvent(new Event("change", { bubbles: true }));
+}
