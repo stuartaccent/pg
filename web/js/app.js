@@ -14,7 +14,8 @@ const views = new Map(); // tab id to its editor
 const language = new Compartment();
 let completions = {};
 let activeTab;
-const MAX_HISTORY = 200;
+const MAX_HISTORY = 2000;
+const MAX_HISTORY_CHARS = 2_000_000; // localStorage holds about 5MB, and tabs' SQL must still fit
 const MIN_PANE = 80; // the smallest a dragged pane gets; what's beside it keeps twice this, as it holds the buttons too
 
 const sqlLanguage = () => sql({ dialect: PostgreSQL, schema: completions.schemas ?? {}, defaultSchema: completions.defaultSchema || undefined });
@@ -202,9 +203,11 @@ function formatSQL() {
 const loadHistory = () => JSON.parse(localStorage.getItem("history") ?? "[]");
 
 function remember(sql) {
-	const history = loadHistory().filter((entry) => entry !== sql);
-	history.unshift(sql);
-	localStorage.setItem("history", JSON.stringify(history.slice(0, MAX_HISTORY)));
+	let history = [sql, ...loadHistory().filter((entry) => entry !== sql)].slice(0, MAX_HISTORY);
+	while (history.length > 1 && JSON.stringify(history).length > MAX_HISTORY_CHARS) {
+		history = history.slice(0, Math.ceil(history.length * 0.9));
+	}
+	localStorage.setItem("history", JSON.stringify(history));
 }
 
 function renderHistory() {
