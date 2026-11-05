@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -48,6 +49,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /static/", http.FileServerFS(static))
 	mux.HandleFunc("GET /{$}", s.index)
 	mux.HandleFunc("POST /connect", s.connectService)
+	mux.HandleFunc("GET /services", s.services)
+	mux.HandleFunc("POST /config/{file}", s.editConfig)
 	mux.HandleFunc("POST /tabs", s.newTab)
 	mux.HandleFunc("DELETE /tabs/{id}", s.closeTab)
 	mux.HandleFunc("POST /query", s.query)
@@ -161,6 +164,53 @@ func (s *Server) connectService(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 	w.Header().Set("HX-Trigger", "connected") // reloads the tree
 	render(w, r, ConnectStatus(service, readOnly, nil))
+}
+
+// services lists the service file again, for after it has been edited.
+func (s *Server) services(w http.ResponseWriter, r *http.Request) {
+	services, err := conn.Services()
+	if err != nil {
+		w.WriteHeader(http.StatusNoContent) // what's listed already will do
+		return
+	}
+	s.mu.Lock()
+	current := s.service
+	s.mu.Unlock()
+	render(w, r, serviceOptions(services, current))
+}
+
+// openInEditor opens path in the user's text editor. It's a variable for the tests.
+//
+// shortcut: macOS only, which is all pg has run on. Add xdg-open if that changes.
+var openInEditor = func(path string) error {
+	return exec.Command("open", "-t", path).Run()
+}
+
+// editConfig hands a config file to the user's text editor. pg deliberately
+// never reads these itself, so passwords don't pass through it.
+func (s *Server) editConfig(w http.ResponseWriter, r *http.Request) {
+	var path string
+	var err error
+	switch r.PathValue("file") {
+	case "services":
+		path, err = conn.ServiceFilePath()
+	case "passwords":
+		path, err = conn.PassFilePath()
+	default:
+		http.NotFound(w, r)
+		return
+	}
+	if err == nil {
+		err = conn.EnsureFile(path)
+	}
+	if err == nil {
+		err = openInEditor(path)
+	}
+	if err != nil {
+		render(w, r, ConnectStatus("", false, err))
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) newTab(w http.ResponseWriter, r *http.Request) {

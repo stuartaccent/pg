@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"pg/internal/catalog"
+	"pg/internal/conn"
 	"pg/internal/session"
 )
 
@@ -25,11 +26,8 @@ templ Index(services []string, current string, readOnly bool, err error) {
 		<body class="h-screen flex flex-col gap-2 bg-base-300 text-sm">
 			<header class="navbar bg-base-100 border-b border-base-300 min-h-12 shrink-0 gap-2 px-2" data-theme="dark">
 				<form hx-post="/connect" hx-trigger="change" hx-target="#status">
-					<select name="service" class="select select-sm w-auto">
-						<option value="" disabled selected?={ current == "" }>Choose a service…</option>
-						for _, name := range services {
-							<option value={ name } selected?={ name == current }>{ name }</option>
-						}
+					<select name="service" class="select select-sm w-auto" hx-get="/services" hx-trigger="focus from:window" hx-target="this">
+						@serviceOptions(services, current)
 					</select>
 				</form>
 				<span id="status" class="flex-1 min-w-0">
@@ -41,6 +39,13 @@ templ Index(services []string, current string, readOnly bool, err error) {
 						@ConnectStatus(current, readOnly, nil)
 					}
 				</span>
+				<details class="dropdown dropdown-end">
+					<summary class="btn btn-ghost btn-sm">Config</summary>
+					<ul class="menu dropdown-content z-10 w-48 rounded-box bg-base-200 shadow-md">
+						<li><button type="button" hx-post="/config/services" hx-target="#status" onclick="this.closest('details').open = false">Edit services</button></li>
+						<li><button type="button" hx-post="/config/passwords" hx-target="#status" onclick="this.closest('details').open = false">Edit passwords</button></li>
+					</ul>
+				</details>
 				<button type="button" class="btn btn-square btn-ghost btn-sm" aria-label="Toggle light or dark theme" onclick="toggleTheme()">◐</button>
 			</header>
 			<div class="flex flex-1 min-h-0 gap-2 px-2 pb-2">
@@ -167,13 +172,26 @@ templ NewTab(id string) {
 	</div>
 }
 
+templ serviceOptions(services []string, current string) {
+	<option value="" disabled selected?={ current == "" }>Choose a service…</option>
+	for _, name := range services {
+		<option value={ name } selected?={ name == current }>{ name }</option>
+	}
+}
+
 templ ConnectStatus(service string, readOnly bool, err error) {
 	if err != nil {
 		<span class="text-error whitespace-pre-wrap">{ err.Error() }</span>
+		if conn.PasswordRejected(err) {
+			<span class="text-base-content/60 ml-1">Passwords go in ~/.pgpass, as host:port:database:user:password. Use Config to edit it.</span>
+		}
 	} else {
 		<span class="text-success">Connected to { service }</span>
 		if readOnly {
 			<span class="badge badge-warning badge-sm ml-1">read-only</span>
+		}
+		if path := conn.ExposedPassFile(); path != "" {
+			<span class="badge badge-error badge-sm ml-1" title="Anyone with access to this computer can read your passwords">Password file is readable by others: chmod 600 { path }</span>
 		}
 	}
 }

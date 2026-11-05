@@ -81,13 +81,17 @@ func TestSaveCSV(t *testing.T) {
 	if service == "" {
 		t.Skip("PGIDE_TEST_SERVICE not set")
 	}
-	// Connecting reads the real ~/.pgpass, so only the Downloads folder moves.
-	realHome, err := os.UserHomeDir()
+	// Connecting still needs the real config files, so only Downloads moves.
+	services, err := conn.ServiceFilePath()
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("PGPASSFILE", filepath.Join(realHome, ".pgpass"))
-	t.Setenv("PGSERVICEFILE", filepath.Join(realHome, ".pg_service.conf"))
+	passwords, err := conn.PassFilePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PGSERVICEFILE", services)
+	t.Setenv("PGPASSFILE", passwords)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	connect := func(ctx context.Context) (*pgconn.PgConn, error) { return conn.Connect(ctx, service) }
@@ -106,5 +110,84 @@ func TestSaveCSV(t *testing.T) {
 	files, _ := filepath.Glob(filepath.Join(home, "Downloads", "*"))
 	if len(files) != 1 {
 		t.Errorf("failed export left a file behind: %v", files)
+	}
+}
+
+func TestEditConfig(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PGSERVICEFILE", filepath.Join(dir, "services"))
+	t.Setenv("PGPASSFILE", filepath.Join(dir, "passwords"))
+	var opened []string
+	real := openInEditor
+	openInEditor = func(path string) error {
+		opened = append(opened, path)
+		return nil
+	}
+	t.Cleanup(func() { openInEditor = real })
+
+	s := New()
+	for _, file := range []string{"services", "passwords"} {
+		if got := get(t, s, http.MethodPost, "/config/"+file).Code; got != http.StatusNoContent {
+			t.Errorf("%s status = %d", file, got)
+		}
+		info, err := os.Stat(filepath.Join(dir, file))
+		if err != nil || info.Mode().Perm() != 0o600 {
+			t.Errorf("%s: %v, %v", file, info, err)
+		}
+	}
+	if len(opened) != 2 {
+		t.Errorf("opened = %v", opened)
+	}
+	if got := get(t, s, http.MethodPost, "/config/.ssh%2Fid_rsa").Code; got != http.StatusNotFound {
+		t.Errorf("other file status = %d", got)
+	}
+	if len(opened) != 2 {
+		t.Errorf("opened an unknown file: %v", opened)
+	}
+}
+
+func TestServicesListsTheFileAgain(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "services")
+	t.Setenv("PGSERVICEFILE", file)
+	if err := os.WriteFile(file, []byte("[added]\nhost=localhost\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if body := get(t, New(), http.MethodGet, "/services").Body.String(); !strings.Contains(body, `value="added"`) {
+		t.Errorf("services = %q", body)
+	}
+}
+
+func TestPasswordHint(t *testing.T) {
+	for err, want := range map[error]bool{
+		&pgconn.PgError{Code: "28P01"}: true,
+		&pgconn.PgError{Code: "3D000"}: false,
+	} {
+		var b strings.Builder
+		if rerr := ConnectStatus("", false, err).Render(context.Background(), &b); rerr != nil {
+			t.Fatal(rerr)
+		}
+		if got := strings.Contains(b.String(), ".pgpass"); got != want {
+			t.Errorf("%v: hint shown = %v", err, got)
+		}
+	}
+}
+
+func TestExposedPasswordFileWarning(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pgpass")
+	t.Setenv("PGPASSFILE", path)
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for mode, want := range map[os.FileMode]bool{0o600: false, 0o644: true} {
+		if err := os.Chmod(path, mode); err != nil {
+			t.Fatal(err)
+		}
+		var b strings.Builder
+		if err := ConnectStatus("local", false, nil).Render(context.Background(), &b); err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.Contains(b.String(), "chmod 600 "+path); got != want {
+			t.Errorf("%o: warning shown = %v", mode, got)
+		}
 	}
 }

@@ -3,6 +3,7 @@ package conn
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgservicefile"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // Needs a real server, like the session tests: PGIDE_TEST_SERVICE names a
@@ -103,5 +105,68 @@ func TestExport(t *testing.T) {
 				t.Errorf("got %q, %d rows", out.String(), rows)
 			}
 		})
+	}
+}
+
+func TestEnsureFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".pgpass")
+	if err := EnsureFile(path); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Errorf("mode = %v", info.Mode().Perm())
+	}
+
+	// An existing file keeps its content and its mode.
+	if err := os.WriteFile(path, []byte("keep"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureFile(path); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := os.ReadFile(path)
+	info, _ = os.Stat(path)
+	if string(got) != "keep" || info.Mode().Perm() != 0o640 {
+		t.Errorf("file changed: %q, %v", got, info.Mode().Perm())
+	}
+}
+
+func TestExposedPassFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pgpass")
+	t.Setenv("PGPASSFILE", path)
+	if got := ExposedPassFile(); got != "" {
+		t.Errorf("missing file: %q", got)
+	}
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for mode, want := range map[os.FileMode]string{0o600: "", 0o400: "", 0o640: path, 0o644: path, 0o604: path} {
+		if err := os.Chmod(path, mode); err != nil {
+			t.Fatal(err)
+		}
+		if got := ExposedPassFile(); got != want {
+			t.Errorf("%o: got %q, want %q", mode, got, want)
+		}
+	}
+}
+
+func TestPasswordRejected(t *testing.T) {
+	rejected := &pgconn.PgError{Code: "28P01"}
+	for err, want := range map[error]bool{
+		rejected:                               true,
+		fmt.Errorf("connecting: %w", rejected): true,
+		&pgconn.PgError{Code: "3D000"}:         false,
+		errors.New("connection refused"):       false,
+	} {
+		if got := PasswordRejected(err); got != want {
+			t.Errorf("%v: got %v", err, got)
+		}
 	}
 }
