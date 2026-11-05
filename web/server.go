@@ -138,7 +138,7 @@ func (s *Server) connectService(w http.ResponseWriter, r *http.Request) {
 		err = errors.New("unknown service " + strconv.Quote(service))
 	}
 	if err != nil {
-		render(w, r, ConnectStatus("", false, err))
+		s.connectFailed(w, r, services, err)
 		return
 	}
 
@@ -148,7 +148,7 @@ func (s *Server) connectService(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	c, err := conn.Connect(ctx, service)
 	if err != nil {
-		render(w, r, ConnectStatus("", false, err))
+		s.connectFailed(w, r, services, err)
 		return
 	}
 	readOnly := conn.ReadOnly(c)
@@ -166,6 +166,15 @@ func (s *Server) connectService(w http.ResponseWriter, r *http.Request) {
 	render(w, r, ConnectStatus(service, readOnly, nil))
 }
 
+// connectFailed reports err, and puts the dropdown back to what's connected.
+// Left on the failed choice, picking it again to retry wouldn't be a change.
+func (s *Server) connectFailed(w http.ResponseWriter, r *http.Request, services []string, err error) {
+	s.mu.Lock()
+	current := s.service
+	s.mu.Unlock()
+	render(w, r, ConnectFailed(services, current, err))
+}
+
 // services lists the service file again, for after it has been edited.
 func (s *Server) services(w http.ResponseWriter, r *http.Request) {
 	services, err := conn.Services()
@@ -176,7 +185,7 @@ func (s *Server) services(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	current := s.service
 	s.mu.Unlock()
-	render(w, r, serviceOptions(services, current))
+	render(w, r, serviceSelect(services, current))
 }
 
 // openInEditor opens path in the user's text editor. It's a variable for the tests.

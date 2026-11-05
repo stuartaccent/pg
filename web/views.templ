@@ -26,9 +26,9 @@ templ Index(services []string, current string, readOnly bool, err error) {
 		<body class="h-screen flex flex-col gap-2 bg-base-300 text-sm">
 			<header class="navbar bg-base-100 border-b border-base-300 min-h-12 shrink-0 gap-2 px-2" data-theme="dark">
 				<form hx-post="/connect" hx-trigger="change" hx-target="#status">
-					<select name="service" class="select select-sm w-auto" hx-get="/services" hx-trigger="focus from:window" hx-target="this">
-						@serviceOptions(services, current)
-					</select>
+					<span id="service-picker">
+						@serviceSelect(services, current)
+					</span>
 				</form>
 				<span id="status" class="flex-1 min-w-0">
 					if err != nil {
@@ -172,11 +172,23 @@ templ NewTab(id string) {
 	</div>
 }
 
-templ serviceOptions(services []string, current string) {
-	<option value="" disabled selected?={ current == "" }>Choose a service…</option>
-	for _, name := range services {
-		<option value={ name } selected?={ name == current }>{ name }</option>
-	}
+// serviceSelect is swapped as a whole, not by its options: a browser only
+// honours a disabled selected option when parsing a new select.
+templ serviceSelect(services []string, current string) {
+	<select id="service" name="service" class="select select-sm w-auto" hx-get="/services" hx-trigger="focus from:window" hx-target="#service-picker">
+		<option value="" disabled selected?={ current == "" }>Choose a service…</option>
+		for _, name := range services {
+			<option value={ name } selected?={ name == current }>{ name }</option>
+		}
+	</select>
+}
+
+// ConnectFailed is the error, plus the dropdown to swap back in.
+templ ConnectFailed(services []string, current string, err error) {
+	@ConnectStatus("", false, err)
+	<div hx-swap-oob="innerHTML:#service-picker">
+		@serviceSelect(services, current)
+	</div>
 }
 
 templ ConnectStatus(service string, readOnly bool, err error) {

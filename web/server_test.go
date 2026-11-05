@@ -146,6 +146,27 @@ func TestEditConfig(t *testing.T) {
 	}
 }
 
+func TestFailedConnectResetsTheDropdown(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "services")
+	t.Setenv("PGSERVICEFILE", file)
+	if err := os.WriteFile(file, []byte("[only]\nhost=localhost\nport=1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, service := range []string{"only", "missing"} {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/connect", strings.NewReader("service="+service))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		New().Handler().ServeHTTP(w, req)
+		body := w.Body.String()
+		if !strings.Contains(body, `hx-swap-oob="innerHTML:#service-picker"`) || !strings.Contains(body, `<option value="" disabled selected>`) {
+			t.Errorf("%s: dropdown not reset: %q", service, body)
+		}
+		if w.Header().Get("HX-Trigger") != "" {
+			t.Errorf("%s: a failed connect must not reload the tree", service)
+		}
+	}
+}
+
 func TestServicesListsTheFileAgain(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "services")
 	t.Setenv("PGSERVICEFILE", file)
