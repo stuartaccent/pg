@@ -210,9 +210,16 @@ function remember(sql) {
 	localStorage.setItem("history", JSON.stringify(history));
 }
 
+// Opens a dialog with nothing focused. Left alone, the browser focuses its first
+// link or button, and draws a focus ring round it that looks like a selection.
+function showUnfocused(dialog) {
+	dialog.showModal();
+	document.activeElement.blur();
+}
+
 async function showBackups() {
 	await htmx.ajax("GET", "/backups", { target: "#backups-body" });
-	document.querySelector("#backups").showModal();
+	showUnfocused(document.querySelector("#backups"));
 }
 
 function renderHistory() {
@@ -253,7 +260,7 @@ function showCell(td) {
 		}
 	}
 	document.querySelector("#cell-text").textContent = shown;
-	document.querySelector("#cell").showModal();
+	showUnfocused(document.querySelector("#cell"));
 }
 
 const cellValue = (td) => (td.hasAttribute("data-null") ? "" : td.textContent);
