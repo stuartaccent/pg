@@ -38,7 +38,7 @@ The templ CLI version should match the `github.com/a-h/templ` version in go.mod.
 The SQL editor is CodeMirror 6, bundled from `web/js/app.js` into `web/static/app.js`, which is generated and kept in the repo. Node is only needed to change it:
 
 ```sh
-npm ci && npm run build
+npm ci && npm run build && npm test
 ```
 
 Styling is daisyUI 5.7.46 (vendored as `web/css/daisyui.mjs`) on the Tailwind standalone CLI. `web/static/app.css` is generated, so edit `web/css/app.css` instead. The CLI isn't kept in the repo; on Apple silicon, fetch it once with:

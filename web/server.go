@@ -189,7 +189,7 @@ func (s *Server) query(w http.ResponseWriter, r *http.Request) {
 	case sess == nil:
 		render(w, r, Results(session.Page{Done: true, Err: errors.New("connect to a service first")}, tab))
 	case r.FormValue("explain") != "":
-		render(w, r, Results(sess.Explain(r.FormValue("sql")), tab))
+		render(w, r, Results(sess.Explain(r.FormValue("sql"), r.FormValue("explain") == "analyze"), tab))
 	default:
 		render(w, r, Results(sess.Run(r.FormValue("sql")), tab))
 	}
@@ -253,18 +253,18 @@ func (s *Server) definition(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) completions(w http.ResponseWriter, r *http.Request) {
-	schemas := map[string]map[string][]string{}
+	var done catalog.Completions
 	if cat := s.catalog(); cat != nil {
 		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 		defer cancel()
 		var err error
-		if schemas, err = cat.Completions(ctx); err != nil {
+		if done, err = cat.Completions(ctx); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(schemas)
+	_ = json.NewEncoder(w).Encode(done)
 }
 
 func render(w http.ResponseWriter, r *http.Request, c templ.Component) {

@@ -19,6 +19,10 @@ const PageSize = 500
 // current one (a newer query replaced it, or it already finished).
 var ErrStale = errors.New("query is no longer running")
 
+// ErrOpenTransaction is returned by an Explain that would have to end the
+// transaction the session is in.
+var ErrOpenTransaction = errors.New("finish the open transaction first: explain analyze runs in one of its own and rolls it back")
+
 // ErrClosed is returned once the session has been closed.
 var ErrClosed = errors.New("session is closed")
 
@@ -100,11 +104,12 @@ func (s *Session) Run(sql string) Page {
 	return s.readPage(q)
 }
 
-// Explain cancels whatever is running and returns sql's plan without running it.
+// Explain cancels whatever is running and returns sql's plan. With analyze it
+// also runs sql, inside a transaction that is rolled back.
 //
 // It uses the extended protocol, which refuses more than one statement. Over
 // Run, "select 1; delete from t" would explain the select and run the delete.
-func (s *Session) Explain(sql string) Page {
+func (s *Session) Explain(sql string, analyze bool) Page {
 	s.Cancel()
 
 	s.mu.Lock()
@@ -115,7 +120,20 @@ func (s *Session) Explain(sql string) Page {
 	}
 	defer q.cancel()
 
-	res := s.conn.ExecParams(ctx, "explain "+sql, nil, nil, nil, nil).Read()
+	stmt := "explain " + sql
+	if analyze {
+		// Rolling back would also undo whatever the user has open.
+		if s.conn.TxStatus() != 'I' {
+			return Page{QueryID: q.id, Done: true, Err: ErrOpenTransaction}
+		}
+		if _, err := s.conn.Exec(ctx, "begin").ReadAll(); err != nil {
+			return Page{QueryID: q.id, Done: true, Err: err}
+		}
+		defer s.rollback()
+		stmt = "explain analyze " + sql
+	}
+
+	res := s.conn.ExecParams(ctx, stmt, nil, nil, nil, nil).Read()
 	p := Page{QueryID: q.id, Done: true, Err: res.Err, Elapsed: time.Since(q.start)}
 	if res.Err != nil {
 		return p
@@ -127,6 +145,16 @@ func (s *Session) Explain(sql string) Page {
 	}
 	p.Total = len(p.Rows)
 	return p
+}
+
+// rollback ends the current transaction, even if the query's context was
+// cancelled. Failing to is unsafe to carry on from, so it drops the connection.
+func (s *Session) rollback() {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := s.conn.Exec(ctx, "rollback").ReadAll(); err != nil {
+		_ = s.conn.Close(ctx)
+	}
 }
 
 // begin abandons the current query and readies the connection for a new one.

@@ -42,6 +42,14 @@ var groups = map[string][]Node{
 		{Label: "Columns", Kind: "columns"},
 		{Label: "Indexes", Kind: "indexes"},
 		{Label: "Constraints", Kind: "constraints"},
+		{Label: "Triggers", Kind: "triggers"},
+	},
+	"partitioned": {
+		{Label: "Partitions", Kind: "partitions"},
+		{Label: "Columns", Kind: "columns"},
+		{Label: "Indexes", Kind: "indexes"},
+		{Label: "Constraints", Kind: "constraints"},
+		{Label: "Triggers", Kind: "triggers"},
 	},
 	"view": {
 		{Label: "Columns", Kind: "columns"},
@@ -63,16 +71,22 @@ const (
 	// selectFrom is a query for the rows of relation c in schema n. Postgres
 	// does the identifier quoting, via format's %I.
 	selectFrom = `format('select * from %I.%I limit 100;', n.nspname, c.relname)`
+	// tableKind is how table c expands.
+	tableKind = `case c.relkind when 'p' then 'partitioned' else 'table' end`
+	// rowEstimate is the planner's row count for c, which is free to read where
+	// count(*) can take minutes. It's negative until the table is first analyzed.
+	rowEstimate = `case when c.relkind in ('r', 'm') and c.reltuples >= 0
+		then '~' || to_char(c.reltuples, 'FM999,999,999,990') else '' end`
 )
 
-// relations lists a schema's relations of the given relkinds. Each expands as
-// kind and has the definition def.
-func relations(relkinds, kind, def string) string {
+// relations lists the relations of a schema matching filter. kind is the SQL
+// for how each expands, and def is its definition.
+func relations(filter, kind, def string) string {
 	return `
-		select c.relname, '', ` + selectFrom + `, '` + kind + `', c.oid::text, '` + def + `'
+		select c.relname, ` + rowEstimate + `, ` + selectFrom + `, ` + kind + `, c.oid::text, '` + def + `'
 		from pg_class c
 		join pg_namespace n on n.oid = c.relnamespace
-		where n.nspname = $1 and c.relkind in (` + relkinds + `)
+		where n.nspname = $1 and ` + filter + `
 		order by 1`
 }
 
@@ -89,7 +103,7 @@ var queries = map[string]string{
 		select g.label, g.total::text, '', g.kind, n.nspname::text, ''
 		from pg_namespace n
 		cross join lateral (values
-			(1, 'Tables', 'tables', (select count(*) from pg_class c where c.relnamespace = n.oid and c.relkind in ('r', 'p'))),
+			(1, 'Tables', 'tables', (select count(*) from pg_class c where c.relnamespace = n.oid and c.relkind in ('r', 'p') and not c.relispartition)),
 			(2, 'Views', 'views', (select count(*) from pg_class c where c.relnamespace = n.oid and c.relkind = 'v')),
 			(3, 'Materialized views', 'matviews', (select count(*) from pg_class c where c.relnamespace = n.oid and c.relkind = 'm')),
 			(4, 'Functions', 'functions', (select count(*) from pg_proc p where p.pronamespace = n.oid and ` + ownFunction + `)),
@@ -97,10 +111,18 @@ var queries = map[string]string{
 		) g(ord, label, kind, total)
 		where n.nspname = $1
 		order by g.ord`,
-	"tables":    relations(`'r', 'p'`, "table", "table"),
-	"views":     relations(`'v'`, "view", "view"),
-	"matviews":  relations(`'m'`, "matview", "matview"),
-	"sequences": relations(`'S'`, "", "sequence"),
+	// Partitions are listed under their parent, as pgAdmin does.
+	"tables":    relations(`c.relkind in ('r', 'p') and not c.relispartition`, tableKind, "table"),
+	"views":     relations(`c.relkind = 'v'`, `'view'`, "view"),
+	"matviews":  relations(`c.relkind = 'm'`, `'matview'`, "matview"),
+	"sequences": relations(`c.relkind = 'S'`, `''`, "sequence"),
+	"partitions": `
+		select c.relname, ` + rowEstimate + `, ` + selectFrom + `, ` + tableKind + `, c.oid::text, 'table'
+		from pg_inherits i
+		join pg_class c on c.oid = i.inhrelid
+		join pg_namespace n on n.oid = c.relnamespace
+		where i.inhparent = $1
+		order by 1`,
 	"functions": `
 		select p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')',
 			pg_get_function_result(p.oid), '', '', p.oid::text, 'function'
@@ -126,12 +148,17 @@ var queries = map[string]string{
 		from pg_constraint
 		where conrelid = $1
 		order by 1`,
+	"triggers": `
+		select tgname, pg_get_triggerdef(oid), '', '', '', ''
+		from pg_trigger
+		where tgrelid = $1 and not tgisinternal
+		order by 1`,
 	// position rather than like, so % and _ in the term are literal.
 	// shortcut: stops at 200 matches, add paging if that proves too few.
 	SearchKind: `
 		select * from (
 			select c.relname, n.nspname::text, ` + selectFrom + `,
-				case c.relkind when 'v' then 'view' when 'm' then 'matview' when 'S' then '' else 'table' end,
+				case c.relkind when 'v' then 'view' when 'm' then 'matview' when 'S' then '' when 'p' then 'partitioned' else 'table' end,
 				c.oid::text,
 				case c.relkind when 'v' then 'view' when 'm' then 'matview' when 'S' then 'sequence' else 'table' end
 			from pg_class c
@@ -172,14 +199,15 @@ var definitions = map[string]string{
 		join pg_namespace n on n.oid = c.relnamespace
 		where s.seqrelid = $1`,
 	// Postgres has no pg_get_tabledef, so this one is put together by hand.
-	// shortcut: leaves out inheritance, storage options, triggers and grants,
-	// which its first line says. Use pg_dump's output if those ever matter here.
+	// shortcut: leaves out inheritance, storage options and grants, which its
+	// first line says. Use pg_dump's output if those ever matter here.
 	"table": `
-		select format(E'-- Rebuilt from the catalogs: no inheritance, storage options, triggers or grants.\ncreate table %I.%I (\n%s\n)%s;%s',
+		select format(E'-- Rebuilt from the catalogs: no inheritance, storage options or grants.\ncreate table %I.%I (\n%s\n)%s;%s%s',
 			n.nspname, c.relname,
 			array_to_string(cols.lines || cons.lines, E',\n'),
 			case when c.relkind = 'p' then ' partition by ' || pg_get_partkeydef(c.oid) else '' end,
-			coalesce(idx.lines, ''))
+			coalesce(idx.lines, ''),
+			coalesce(trg.lines, ''))
 		from pg_class c
 		join pg_namespace n on n.oid = c.relnamespace
 		cross join lateral (
@@ -207,6 +235,11 @@ var definitions = map[string]string{
 			where i.indrelid = c.oid
 				and not exists (select 1 from pg_constraint k where k.conrelid = c.oid and k.conindid = i.indexrelid)
 		) idx
+		cross join lateral (
+			select string_agg(E'\n' || pg_get_triggerdef(t.oid) || ';', '' order by t.tgname) lines
+			from pg_trigger t
+			where t.tgrelid = c.oid and not t.tgisinternal
+		) trg
 		where c.oid = $1`,
 }
 
@@ -281,28 +314,34 @@ func (c *Catalog) Definition(ctx context.Context, def, id string) (string, error
 	return string(rows[0][0]), nil
 }
 
-// Completions returns the columns of every table and view by schema and name,
-// which is the shape the editor's autocomplete takes.
-func (c *Catalog) Completions(ctx context.Context) (map[string]map[string][]string, error) {
+// Completions is what the editor's autocomplete works from.
+type Completions struct {
+	DefaultSchema string                         `json:"defaultSchema"` // where unqualified names resolve; empty if nowhere
+	Schemas       map[string]map[string][]string `json:"schemas"`       // columns by schema and table
+}
+
+// Completions returns the columns of every table and view.
+func (c *Catalog) Completions(ctx context.Context) (Completions, error) {
 	rows, err := c.read(ctx, `
-		select n.nspname, c.relname, a.attname
+		select n.nspname, c.relname, a.attname, current_schema()
 		from pg_class c
 		join pg_namespace n on n.oid = c.relnamespace
 		join pg_attribute a on a.attrelid = c.oid
 		where c.relkind in ('r', 'p', 'v', 'm') and a.attnum > 0 and not a.attisdropped and `+userSchema+`
 		order by 1, 2, a.attnum`, nil)
 	if err != nil {
-		return nil, err
+		return Completions{}, err
 	}
-	schemas := map[string]map[string][]string{}
+	done := Completions{Schemas: map[string]map[string][]string{}}
 	for _, r := range rows {
 		schema, table := string(r[0]), string(r[1])
-		if schemas[schema] == nil {
-			schemas[schema] = map[string][]string{}
+		if done.Schemas[schema] == nil {
+			done.Schemas[schema] = map[string][]string{}
 		}
-		schemas[schema][table] = append(schemas[schema][table], string(r[2]))
+		done.Schemas[schema][table] = append(done.Schemas[schema][table], string(r[2]))
+		done.DefaultSchema = string(r[3])
 	}
-	return schemas, nil
+	return done, nil
 }
 
 // read runs sql on the catalog's connection, opening it if need be.

@@ -31,7 +31,7 @@ func TestNotConnected(t *testing.T) {
 	if got := get(t, s, http.MethodGet, "/definition?def=view&id=1").Code; got != http.StatusConflict {
 		t.Errorf("definition status = %d", got)
 	}
-	if got := get(t, s, http.MethodGet, "/completions").Body.String(); strings.TrimSpace(got) != "{}" {
+	if got := get(t, s, http.MethodGet, "/completions").Body.String(); !strings.Contains(got, `"schemas":null`) {
 		t.Errorf("completions = %q", got)
 	}
 }

@@ -63,6 +63,9 @@ func TestWalk(t *testing.T) {
 	setup := `
 		create temp table "Odd ""name" (id int primary key, label varchar(10) default 'x', extra int generated always as (id * 2) stored);
 		create index on "Odd ""name" (label);
+		create trigger odd_trigger before update on "Odd ""name" for each row execute function suppress_redundant_updates_trigger();
+		create temp table parted (id int) partition by range (id);
+		create temp table parted_low partition of parted for values from (1) to (10);
 		create temp view odd_view as select 1 as one;
 		create temp sequence odd_seq;
 		select pg_my_temp_schema()::regnamespace::text`
@@ -76,15 +79,24 @@ func TestWalk(t *testing.T) {
 	if got := labels(schemaGroups); !slices.Equal(got, []string{"Tables", "Views", "Materialized views", "Functions", "Sequences"}) {
 		t.Errorf("schema groups = %v", got)
 	}
-	if schemaGroups[0].Detail != "1" || schemaGroups[3].Detail != "0" || schemaGroups[0].ID != schema {
+	if schemaGroups[0].Detail != "2" || schemaGroups[3].Detail != "0" || schemaGroups[0].ID != schema {
 		t.Errorf("schema group details = %+v", schemaGroups)
 	}
 
 	tables := children(t, c, "tables", schema)
-	if len(tables) != 1 || tables[0].Label != `Odd "name` || tables[0].Kind != "table" {
-		t.Fatalf("tables = %+v", tables)
+	if got := labels(tables); !slices.Equal(got, []string{`Odd "name`, "parted"}) {
+		t.Fatalf("tables = %v", got)
 	}
-	table := tables[0]
+	table, parted := tables[0], tables[1]
+	if table.Kind != "table" || parted.Kind != "partitioned" {
+		t.Errorf("table kinds = %q, %q", table.Kind, parted.Kind)
+	}
+	if got := labels(children(t, c, parted.Kind, parted.ID)); got[0] != "Partitions" {
+		t.Errorf("partitioned groups = %v", got)
+	}
+	if got := children(t, c, "partitions", parted.ID); len(got) != 1 || got[0].Label != "parted_low" || got[0].Kind != "table" {
+		t.Errorf("partitions = %+v", got)
+	}
 	if want := `"Odd ""name" limit 100;`; !strings.HasSuffix(table.SQL, want) {
 		t.Errorf("SQL = %q, want suffix %q", table.SQL, want)
 	}
@@ -93,7 +105,7 @@ func TestWalk(t *testing.T) {
 	}
 
 	groups := children(t, c, table.Kind, table.ID)
-	if got := labels(groups); !slices.Equal(got, []string{"Columns", "Indexes", "Constraints"}) {
+	if got := labels(groups); !slices.Equal(got, []string{"Columns", "Indexes", "Constraints", "Triggers"}) {
 		t.Errorf("table groups = %v", got)
 	}
 	if groups[0].ID != table.ID {
@@ -114,6 +126,18 @@ func TestWalk(t *testing.T) {
 		t.Errorf("constraints = %+v", con)
 	}
 
+	if trg := children(t, c, "triggers", table.ID); len(trg) != 1 || trg[0].Label != "odd_trigger" {
+		t.Errorf("triggers = %+v", trg)
+	}
+
+	// The estimate appears once the table has been analyzed.
+	if _, err := c.conn.Exec(context.Background(), `insert into "Odd ""name" (id) values (1); analyze "Odd ""name"`).ReadAll(); err != nil {
+		t.Fatal(err)
+	}
+	if got := children(t, c, "tables", schema)[0].Detail; got != "~1" {
+		t.Errorf("row estimate = %q", got)
+	}
+
 	if v := children(t, c, "views", schema); len(v) != 1 || v[0].Kind != "view" {
 		t.Errorf("views = %+v", v)
 	}
@@ -131,13 +155,14 @@ func TestWalk(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"id integer not null", "default 'x'", "generated always as ((id * 2)) stored", "PRIMARY KEY (id)", "CREATE INDEX"} {
+	for _, want := range []string{"id integer not null", "default 'x'", "generated always as ((id * 2)) stored", "PRIMARY KEY (id)", "CREATE INDEX", "CREATE TRIGGER odd_trigger"} {
 		if !strings.Contains(def, want) {
 			t.Errorf("definition lacks %q:\n%s", want, def)
 		}
 	}
 	rerun := strings.NewReplacer(schema+".", "defcheck.", `"Odd ""name_pkey"`, "defcheck_pkey",
-		`"Odd ""name_label_idx" ON pg_temp.`, "defcheck_idx ON defcheck.").Replace(def)
+		`"Odd ""name_label_idx" ON pg_temp.`, "defcheck_idx ON defcheck.",
+		`ON pg_temp."Odd ""name"`, `ON defcheck."Odd ""name"`).Replace(def)
 	if _, err := c.conn.Exec(ctx, "begin; create schema defcheck; "+rerun).ReadAll(); err != nil {
 		t.Errorf("table definition does not run: %v\n%s", err, rerun)
 	}
@@ -201,8 +226,12 @@ func TestClosedCatalogDoesNotReconnect(t *testing.T) {
 
 func TestCompletions(t *testing.T) {
 	c := newTestCatalog(t)
-	if _, err := c.Completions(context.Background()); err != nil {
+	got, err := c.Completions(context.Background())
+	if err != nil {
 		t.Fatal(err)
+	}
+	if len(got.Schemas) > 0 && got.DefaultSchema == "" {
+		t.Errorf("no default schema: %+v", got.DefaultSchema)
 	}
 }
 
