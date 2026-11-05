@@ -7,14 +7,23 @@ package catalog
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-// RootKind is the kind of the tree's top level.
-const RootKind = "schemas"
+const (
+	// RootKind is the kind of the tree's top level.
+	RootKind = "schemas"
+	// SearchKind finds objects by name. Its id is the term; an empty one gives
+	// the top level.
+	SearchKind = "search"
+)
+
+// ErrClosed is returned once the catalog has been closed.
+var ErrClosed = errors.New("catalog is closed")
 
 // Node is one entry in the tree.
 type Node struct {
@@ -22,19 +31,13 @@ type Node struct {
 	Detail string // shown beside the label, e.g. a column's type
 	SQL    string // a query for this object, if it has rows to show
 	Kind   string // the kind to pass to Children to expand it; empty for a leaf
-	ID     string // the id to pass to Children
+	ID     string // the id to pass to Children and Definition
+	Def    string // the def to pass to Definition; empty if it has none
 }
 
-// groups are the fixed folders under a schema or relation. Their children use
-// the same id as the parent.
+// groups are the fixed folders under a relation. Their children use the same
+// id as the parent.
 var groups = map[string][]Node{
-	"schema": {
-		{Label: "Tables", Kind: "tables"},
-		{Label: "Views", Kind: "views"},
-		{Label: "Materialized views", Kind: "matviews"},
-		{Label: "Functions", Kind: "functions"},
-		{Label: "Sequences", Kind: "sequences"},
-	},
 	"table": {
 		{Label: "Columns", Kind: "columns"},
 		{Label: "Indexes", Kind: "indexes"},
@@ -49,55 +52,162 @@ var groups = map[string][]Node{
 	},
 }
 
-// relations lists a schema's relations of the given relkinds, which expand as
-// the given kind. Postgres does the identifier quoting, via format's %I.
-func relations(relkinds, kind string) string {
-	return fmt.Sprintf(`
-		select c.relname, '', format('select * from %%I.%%I limit 100;', n.nspname, c.relname), '%s', c.oid::text
+const (
+	// userSchema hides pg_catalog, pg_toast and the like, as pgAdmin does by default.
+	userSchema = `n.nspname !~ '^pg_' and n.nspname <> 'information_schema'`
+	// ownFunction hides functions that belong to an extension, of which there
+	// can be hundreds. p is pg_proc.
+	ownFunction = `p.prokind in ('f', 'p') and not exists (
+		select 1 from pg_depend d
+		where d.classid = 'pg_proc'::regclass and d.objid = p.oid and d.deptype = 'e')`
+	// selectFrom is a query for the rows of relation c in schema n. Postgres
+	// does the identifier quoting, via format's %I.
+	selectFrom = `format('select * from %I.%I limit 100;', n.nspname, c.relname)`
+)
+
+// relations lists a schema's relations of the given relkinds. Each expands as
+// kind and has the definition def.
+func relations(relkinds, kind, def string) string {
+	return `
+		select c.relname, '', ` + selectFrom + `, '` + kind + `', c.oid::text, '` + def + `'
 		from pg_class c
 		join pg_namespace n on n.oid = c.relnamespace
-		where n.nspname = $1 and c.relkind in (%s)
-		order by 1`, kind, relkinds)
+		where n.nspname = $1 and c.relkind in (` + relkinds + `)
+		order by 1`
 }
 
-// queries return one row per node: label, detail, sql, kind, id. A kind's id,
-// if it has one, is bound as $1: a schema name or a relation's oid.
+// queries return one row per node: label, detail, sql, kind, id, def. A kind's
+// id, if it has one, is bound as $1: a schema name, a relation's oid or a
+// search term.
 var queries = map[string]string{
-	// Hides pg_catalog, pg_toast and the like, as pgAdmin does by default.
 	RootKind: `
-		select nspname, '', '', 'schema', nspname
-		from pg_namespace
-		where nspname !~ '^pg_' and nspname <> 'information_schema'
+		select n.nspname, '', '', 'schema', n.nspname, ''
+		from pg_namespace n
+		where ` + userSchema + `
 		order by 1`,
-	"tables":    relations(`'r', 'p'`, "table"),
-	"views":     relations(`'v'`, "view"),
-	"matviews":  relations(`'m'`, "matview"),
-	"sequences": relations(`'S'`, ""),
+	"schema": `
+		select g.label, g.total::text, '', g.kind, n.nspname::text, ''
+		from pg_namespace n
+		cross join lateral (values
+			(1, 'Tables', 'tables', (select count(*) from pg_class c where c.relnamespace = n.oid and c.relkind in ('r', 'p'))),
+			(2, 'Views', 'views', (select count(*) from pg_class c where c.relnamespace = n.oid and c.relkind = 'v')),
+			(3, 'Materialized views', 'matviews', (select count(*) from pg_class c where c.relnamespace = n.oid and c.relkind = 'm')),
+			(4, 'Functions', 'functions', (select count(*) from pg_proc p where p.pronamespace = n.oid and ` + ownFunction + `)),
+			(5, 'Sequences', 'sequences', (select count(*) from pg_class c where c.relnamespace = n.oid and c.relkind = 'S'))
+		) g(ord, label, kind, total)
+		where n.nspname = $1
+		order by g.ord`,
+	"tables":    relations(`'r', 'p'`, "table", "table"),
+	"views":     relations(`'v'`, "view", "view"),
+	"matviews":  relations(`'m'`, "matview", "matview"),
+	"sequences": relations(`'S'`, "", "sequence"),
 	"functions": `
 		select p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')',
-			pg_get_function_result(p.oid), '', '', ''
+			pg_get_function_result(p.oid), '', '', p.oid::text, 'function'
 		from pg_proc p
 		join pg_namespace n on n.oid = p.pronamespace
-		where n.nspname = $1 and p.prokind in ('f', 'p')
+		where n.nspname = $1 and ` + ownFunction + `
 		order by 1`,
 	"columns": `
 		select attname,
 			format_type(atttypid, atttypmod) || case when attnotnull then ' not null' else '' end,
-			'', '', ''
+			'', '', '', ''
 		from pg_attribute
 		where attrelid = $1 and attnum > 0 and not attisdropped
 		order by attnum`,
 	"indexes": `
-		select c.relname, pg_get_indexdef(i.indexrelid), '', '', ''
+		select c.relname, pg_get_indexdef(i.indexrelid), '', '', '', ''
 		from pg_index i
 		join pg_class c on c.oid = i.indexrelid
 		where i.indrelid = $1
 		order by 1`,
 	"constraints": `
-		select conname, pg_get_constraintdef(oid), '', '', ''
+		select conname, pg_get_constraintdef(oid), '', '', '', ''
 		from pg_constraint
 		where conrelid = $1
 		order by 1`,
+	// position rather than like, so % and _ in the term are literal.
+	// shortcut: stops at 200 matches, add paging if that proves too few.
+	SearchKind: `
+		select * from (
+			select c.relname, n.nspname::text, ` + selectFrom + `,
+				case c.relkind when 'v' then 'view' when 'm' then 'matview' when 'S' then '' else 'table' end,
+				c.oid::text,
+				case c.relkind when 'v' then 'view' when 'm' then 'matview' when 'S' then 'sequence' else 'table' end
+			from pg_class c
+			join pg_namespace n on n.oid = c.relnamespace
+			where c.relkind in ('r', 'p', 'v', 'm', 'S') and ` + userSchema + `
+				and position(lower($1) in lower(c.relname)) > 0
+			union all
+			select p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')',
+				n.nspname::text, '', '', p.oid::text, 'function'
+			from pg_proc p
+			join pg_namespace n on n.oid = p.pronamespace
+			where ` + ownFunction + ` and ` + userSchema + `
+				and position(lower($1) in lower(p.proname)) > 0
+		) found
+		order by 1, 2
+		limit 200`,
+}
+
+// definitions return one row and column: the object's SQL. $1 is its oid.
+var definitions = map[string]string{
+	"function": `select rtrim(pg_get_functiondef($1::oid), E'\n') || ';'`,
+	"view": `
+		select format(E'create or replace view %I.%I as\n%s', n.nspname, c.relname, pg_get_viewdef(c.oid, true))
+		from pg_class c
+		join pg_namespace n on n.oid = c.relnamespace
+		where c.oid = $1`,
+	"matview": `
+		select format(E'create materialized view %I.%I as\n%s', n.nspname, c.relname, pg_get_viewdef(c.oid, true))
+		from pg_class c
+		join pg_namespace n on n.oid = c.relnamespace
+		where c.oid = $1`,
+	"sequence": `
+		select format('create sequence %I.%I as %s increment %s minvalue %s maxvalue %s start %s cache %s%s;',
+			n.nspname, c.relname, format_type(s.seqtypid, null), s.seqincrement, s.seqmin, s.seqmax,
+			s.seqstart, s.seqcache, case when s.seqcycle then ' cycle' else '' end)
+		from pg_sequence s
+		join pg_class c on c.oid = s.seqrelid
+		join pg_namespace n on n.oid = c.relnamespace
+		where s.seqrelid = $1`,
+	// Postgres has no pg_get_tabledef, so this one is put together by hand.
+	// shortcut: leaves out inheritance, storage options, triggers and grants,
+	// which its first line says. Use pg_dump's output if those ever matter here.
+	"table": `
+		select format(E'-- Rebuilt from the catalogs: no inheritance, storage options, triggers or grants.\ncreate table %I.%I (\n%s\n)%s;%s',
+			n.nspname, c.relname,
+			array_to_string(cols.lines || cons.lines, E',\n'),
+			case when c.relkind = 'p' then ' partition by ' || pg_get_partkeydef(c.oid) else '' end,
+			coalesce(idx.lines, ''))
+		from pg_class c
+		join pg_namespace n on n.oid = c.relnamespace
+		cross join lateral (
+			select coalesce(array_agg(format('    %I %s%s%s%s', a.attname, format_type(a.atttypid, a.atttypmod),
+				case a.attidentity when 'a' then ' generated always as identity' when 'd' then ' generated by default as identity' else '' end,
+				case
+					when a.attgenerated <> '' then format(' generated always as (%s)%s', pg_get_expr(d.adbin, d.adrelid),
+						case a.attgenerated when 's' then ' stored' else ' virtual' end)
+					when d.adbin is not null then ' default ' || pg_get_expr(d.adbin, d.adrelid)
+					else ''
+				end,
+				case when a.attnotnull then ' not null' else '' end) order by a.attnum), '{}') lines
+			from pg_attribute a
+			left join pg_attrdef d on d.adrelid = a.attrelid and d.adnum = a.attnum
+			where a.attrelid = c.oid and a.attnum > 0 and not a.attisdropped
+		) cols
+		cross join lateral (
+			select coalesce(array_agg(format('    constraint %I %s', k.conname, pg_get_constraintdef(k.oid)) order by k.conname), '{}') lines
+			from pg_constraint k
+			where k.conrelid = c.oid and k.contype <> 'n'
+		) cons
+		cross join lateral (
+			select string_agg(E'\n' || pg_get_indexdef(i.indexrelid) || ';', '' order by i.indexrelid) lines
+			from pg_index i
+			where i.indrelid = c.oid
+				and not exists (select 1 from pg_constraint k where k.conrelid = c.oid and k.conindid = i.indexrelid)
+		) idx
+		where c.oid = $1`,
 }
 
 // Catalog reads the tree over one connection, opened on first use and
@@ -105,8 +215,9 @@ var queries = map[string]string{
 type Catalog struct {
 	connect func(context.Context) (*pgconn.PgConn, error)
 
-	mu   sync.Mutex
-	conn *pgconn.PgConn // guarded by mu
+	mu     sync.Mutex
+	conn   *pgconn.PgConn // guarded by mu
+	closed bool           // guarded by mu
 }
 
 // New returns a catalog that connects with connect.
@@ -125,6 +236,9 @@ func (c *Catalog) Children(ctx context.Context, kind, id string) ([]Node, error)
 		}
 		return nodes, nil
 	}
+	if kind == SearchKind && id == "" {
+		kind = RootKind
+	}
 	sql, ok := queries[kind]
 	if !ok {
 		return nil, fmt.Errorf("unknown tree node kind %q", kind)
@@ -133,9 +247,71 @@ func (c *Catalog) Children(ctx context.Context, kind, id string) ([]Node, error)
 	if id != "" {
 		params = [][]byte{[]byte(id)}
 	}
+	rows, err := c.read(ctx, sql, params)
+	if err != nil {
+		return nil, err
+	}
+	nodes := make([]Node, len(rows))
+	for i, r := range rows {
+		nodes[i] = Node{
+			Label:  string(r[0]),
+			Detail: string(r[1]),
+			SQL:    string(r[2]),
+			Kind:   string(r[3]),
+			ID:     string(r[4]),
+			Def:    string(r[5]),
+		}
+	}
+	return nodes, nil
+}
 
+// Definition returns the SQL that defines a node, given its Def and ID.
+func (c *Catalog) Definition(ctx context.Context, def, id string) (string, error) {
+	sql, ok := definitions[def]
+	if !ok {
+		return "", fmt.Errorf("unknown definition %q", def)
+	}
+	rows, err := c.read(ctx, sql, [][]byte{[]byte(id)})
+	if err != nil {
+		return "", err
+	}
+	if len(rows) == 0 {
+		return "", errors.New("object no longer exists")
+	}
+	return string(rows[0][0]), nil
+}
+
+// Completions returns the columns of every table and view by schema and name,
+// which is the shape the editor's autocomplete takes.
+func (c *Catalog) Completions(ctx context.Context) (map[string]map[string][]string, error) {
+	rows, err := c.read(ctx, `
+		select n.nspname, c.relname, a.attname
+		from pg_class c
+		join pg_namespace n on n.oid = c.relnamespace
+		join pg_attribute a on a.attrelid = c.oid
+		where c.relkind in ('r', 'p', 'v', 'm') and a.attnum > 0 and not a.attisdropped and `+userSchema+`
+		order by 1, 2, a.attnum`, nil)
+	if err != nil {
+		return nil, err
+	}
+	schemas := map[string]map[string][]string{}
+	for _, r := range rows {
+		schema, table := string(r[0]), string(r[1])
+		if schemas[schema] == nil {
+			schemas[schema] = map[string][]string{}
+		}
+		schemas[schema][table] = append(schemas[schema][table], string(r[2]))
+	}
+	return schemas, nil
+}
+
+// read runs sql on the catalog's connection, opening it if need be.
+func (c *Catalog) read(ctx context.Context, sql string, params [][]byte) ([][][]byte, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.closed {
+		return nil, ErrClosed
+	}
 	if c.conn == nil || c.conn.IsClosed() {
 		conn, err := c.connect(ctx)
 		if err != nil {
@@ -144,26 +320,14 @@ func (c *Catalog) Children(ctx context.Context, kind, id string) ([]Node, error)
 		c.conn = conn
 	}
 	res := c.conn.ExecParams(ctx, sql, params, nil, nil, nil).Read()
-	if res.Err != nil {
-		return nil, res.Err
-	}
-	nodes := make([]Node, len(res.Rows))
-	for i, r := range res.Rows {
-		nodes[i] = Node{
-			Label:  string(r[0]),
-			Detail: string(r[1]),
-			SQL:    string(r[2]),
-			Kind:   string(r[3]),
-			ID:     string(r[4]),
-		}
-	}
-	return nodes, nil
+	return res.Rows, res.Err
 }
 
 // Close closes the connection, if one was opened.
 func (c *Catalog) Close(ctx context.Context) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.closed = true
 	if c.conn == nil {
 		return nil
 	}

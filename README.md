@@ -13,6 +13,12 @@ dbname=postgres
 user=stuart
 ```
 
+To make a service read-only, for production say, add this line to it. pg shows a badge when it's on. It's a safety net rather than a lock, as `set default_transaction_read_only = off` turns it back off (Postgres 14 or later is needed for the badge).
+
+```ini
+options=-c default_transaction_read_only=on
+```
+
 ## Run
 
 ```sh
@@ -28,6 +34,12 @@ tmp/tailwindcss -i web/css/app.css -o web/static/app.css --minify --watch   # wh
 ```
 
 The templ CLI version should match the `github.com/a-h/templ` version in go.mod.
+
+The SQL editor is CodeMirror 6, bundled from `web/js/app.js` into `web/static/app.js`, which is generated and kept in the repo. Node is only needed to change it:
+
+```sh
+npm ci && npm run build
+```
 
 Styling is daisyUI 5.7.46 (vendored as `web/css/daisyui.mjs`) on the Tailwind standalone CLI. `web/static/app.css` is generated, so edit `web/css/app.css` instead. The CLI isn't kept in the repo; on Apple silicon, fetch it once with:
 
@@ -48,7 +60,8 @@ PGIDE_TEST_SERVICE=local go test -race ./...
 - `cmd/pgide` — Wails window around `web.Handler`
 - `cmd/dev` — same handler on localhost for a normal browser
 - `internal/conn` — list services, connect (cancel keeps the connection alive)
-- `internal/session` — one connection, run / page / cancel
-- `internal/catalog` — a second connection, reads the browser tree from the system catalogs
+- `internal/session` — one connection, run / page / explain / cancel; each query tab has its own
+- `internal/catalog` — its own connection, reads the browser tree, definitions and completions from the system catalogs
 - `web` — HTTP handlers, templ views, vendored htmx 2.0.11
 - `web/css` — Tailwind source and vendored daisyUI, built into `web/static/app.css`
+- `web/js` — editor and tab code, built into `web/static/app.js`

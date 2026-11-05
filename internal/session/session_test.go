@@ -149,3 +149,72 @@ func TestReconnect(t *testing.T) {
 		t.Fatalf("expected reconnect, got %v", p.Err)
 	}
 }
+
+func TestElapsedLeavesOutTimeBetweenPages(t *testing.T) {
+	s := newTestSession(t)
+	p := s.Run("select g from generate_series(1, 600) g")
+	if p.Done {
+		t.Fatal("expected more than one page")
+	}
+	pause := 300 * time.Millisecond
+	time.Sleep(pause)
+	p, err := s.More(p.QueryID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !p.Done || p.Elapsed <= 0 || p.Elapsed >= pause {
+		t.Fatalf("done = %v, elapsed = %v, want under %v", p.Done, p.Elapsed, pause)
+	}
+}
+
+func TestExplain(t *testing.T) {
+	s := newTestSession(t)
+	if p := s.Run("create temp table explained (id int); insert into explained values (1)"); p.Err != nil {
+		t.Fatal(p.Err)
+	}
+
+	p := s.Explain("delete from explained;")
+	if p.Err != nil || !p.Done || len(p.Columns) != 1 || len(p.Rows) == 0 {
+		t.Fatalf("page = %+v", p)
+	}
+
+	// A second statement must be refused, not run.
+	if p := s.Explain("select 1; delete from explained"); p.Err == nil {
+		t.Fatal("two statements: want an error")
+	}
+	p = s.Run("select count(*) from explained")
+	if p.Err != nil || p.Rows[0][0].Text != "1" {
+		t.Fatalf("explain changed the table: %+v", p)
+	}
+}
+
+func TestClosedSessionDoesNotReconnect(t *testing.T) {
+	s := newTestSession(t)
+	connects := 0
+	connect := s.connect
+	s.connect = func(ctx context.Context) (*pgconn.PgConn, error) {
+		connects++
+		return connect(ctx)
+	}
+	if err := s.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if p := s.Run("select 1"); !errors.Is(p.Err, ErrClosed) {
+		t.Errorf("Run err = %v, want ErrClosed", p.Err)
+	}
+	if p := s.Explain("select 1"); !errors.Is(p.Err, ErrClosed) {
+		t.Errorf("Explain err = %v, want ErrClosed", p.Err)
+	}
+	if connects != 0 {
+		t.Errorf("reconnected %d times", connects)
+	}
+}
+
+func TestConnectsOnFirstUse(t *testing.T) {
+	s := newTestSession(t)
+	lazy := New(nil, s.connect)
+	t.Cleanup(func() { _ = lazy.Close(context.Background()) })
+	if p := lazy.Run("select 1"); p.Err != nil || len(p.Rows) != 1 {
+		t.Fatalf("page = %+v", p)
+	}
+}

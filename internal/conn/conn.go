@@ -73,6 +73,13 @@ func Connect(ctx context.Context, service string) (*pgconn.PgConn, error) {
 	return pgconn.ConnectConfig(ctx, cfg)
 }
 
+// ReadOnly reports whether c defaults to read-only transactions, which a
+// service asks for with options=-c default_transaction_read_only=on. Servers
+// before Postgres 14 don't report the setting, so it reads as false there.
+func ReadOnly(c *pgconn.PgConn) bool {
+	return c.ParameterStatus("default_transaction_read_only") == "on"
+}
+
 // quote quotes a value for a keyword/value connection string.
 func quote(s string) string {
 	s = strings.ReplaceAll(s, `\`, `\\`)

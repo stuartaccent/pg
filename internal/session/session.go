@@ -19,6 +19,13 @@ const PageSize = 500
 // current one (a newer query replaced it, or it already finished).
 var ErrStale = errors.New("query is no longer running")
 
+// ErrClosed is returned once the session has been closed.
+var ErrClosed = errors.New("session is closed")
+
+// nextID is shared so a query id is never reused by a later session, where an
+// old result's sentinel row could otherwise fetch a new query's rows.
+var nextID atomic.Uint64
+
 // Value is one cell. Values come back in Postgres' text format, which is
 // exactly what we want to display.
 type Value struct {
@@ -38,7 +45,7 @@ type Page struct {
 	Done    bool
 	Tags    []string // command tags, e.g. "SELECT 12", "UPDATE 3"
 	Err     error
-	Elapsed time.Duration
+	Elapsed time.Duration // time spent running, not waiting for the next page to be asked for
 }
 
 // Session owns one connection. Run, More and Close serialise on mu;
@@ -47,29 +54,29 @@ type Page struct {
 type Session struct {
 	connect func(context.Context) (*pgconn.PgConn, error)
 
-	mu   sync.Mutex
-	conn *pgconn.PgConn // guarded by mu
-	q    *query         // guarded by mu; the current unfinished query
+	mu     sync.Mutex
+	conn   *pgconn.PgConn // guarded by mu
+	q      *query         // guarded by mu; the current unfinished query
+	closed bool           // guarded by mu
 
 	cancelMu sync.Mutex
 	cancel   context.CancelFunc // cancels the most recent query
-
-	nextID atomic.Uint64
 }
 
 type query struct {
-	id     uint64
-	mrr    *pgconn.MultiResultReader
-	rr     *pgconn.ResultReader // the result set being paged, once found
-	cancel context.CancelFunc
-	start  time.Time
-	ncols  int
-	total  int
-	tags   []string
+	id      uint64
+	mrr     *pgconn.MultiResultReader
+	rr      *pgconn.ResultReader // the result set being paged, once found
+	cancel  context.CancelFunc
+	start   time.Time     // when the current page began
+	elapsed time.Duration // time spent on earlier pages
+	ncols   int
+	total   int
+	tags    []string
 }
 
-// New returns a session using conn. connect is used to reconnect if the
-// connection is lost.
+// New returns a session using conn, which may be nil to connect on first use.
+// connect is used for that and to reconnect if the connection is lost.
 func New(conn *pgconn.PgConn, connect func(context.Context) (*pgconn.PgConn, error)) *Session {
 	return &Session{conn: conn, connect: connect}
 }
@@ -83,6 +90,48 @@ func (s *Session) Run(sql string) Page {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	ctx, q, err := s.begin()
+	if err != nil {
+		return Page{QueryID: q.id, Done: true, Err: err}
+	}
+
+	q.mrr = s.conn.Exec(ctx, sql)
+	s.q = q
+	return s.readPage(q)
+}
+
+// Explain cancels whatever is running and returns sql's plan without running it.
+//
+// It uses the extended protocol, which refuses more than one statement. Over
+// Run, "select 1; delete from t" would explain the select and run the delete.
+func (s *Session) Explain(sql string) Page {
+	s.Cancel()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ctx, q, err := s.begin()
+	if err != nil {
+		return Page{QueryID: q.id, Done: true, Err: err}
+	}
+	defer q.cancel()
+
+	res := s.conn.ExecParams(ctx, "explain "+sql, nil, nil, nil, nil).Read()
+	p := Page{QueryID: q.id, Done: true, Err: res.Err, Elapsed: time.Since(q.start)}
+	if res.Err != nil {
+		return p
+	}
+	p.Columns, p.NumCols = []string{"QUERY PLAN"}, 1
+	p.Rows = make([][]Value, len(res.Rows))
+	for i, row := range res.Rows {
+		p.Rows[i] = copyRow(row)
+	}
+	p.Total = len(p.Rows)
+	return p
+}
+
+// begin abandons the current query and readies the connection for a new one.
+// Must be called with mu held, and after Cancel.
+func (s *Session) begin() (context.Context, *query, error) {
 	s.closeQuery()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -90,20 +139,20 @@ func (s *Session) Run(sql string) Page {
 	s.cancel = cancel
 	s.cancelMu.Unlock()
 
-	q := &query{id: s.nextID.Add(1), cancel: cancel, start: time.Now()}
-
+	q := &query{id: nextID.Add(1), cancel: cancel, start: time.Now()}
+	if s.closed {
+		cancel()
+		return ctx, q, ErrClosed
+	}
 	if s.conn == nil || s.conn.IsClosed() {
 		conn, err := s.connect(ctx)
 		if err != nil {
 			cancel()
-			return Page{QueryID: q.id, Done: true, Err: err}
+			return ctx, q, err
 		}
 		s.conn = conn
 	}
-
-	q.mrr = s.conn.Exec(ctx, sql)
-	s.q = q
-	return s.readPage(q)
+	return ctx, q, nil
 }
 
 // More returns the next page of query id.
@@ -113,6 +162,7 @@ func (s *Session) More(id uint64) (Page, error) {
 	if s.q == nil || s.q.id != id {
 		return Page{}, ErrStale
 	}
+	s.q.start = time.Now()
 	return s.readPage(s.q), nil
 }
 
@@ -131,6 +181,7 @@ func (s *Session) Close(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.closeQuery()
+	s.closed = true
 	if s.conn == nil {
 		return nil
 	}
@@ -171,6 +222,7 @@ func (s *Session) readPage(q *query) Page {
 	q.total += len(p.Rows)
 	p.Total = q.total
 	if len(p.Rows) == PageSize {
+		q.elapsed += time.Since(q.start)
 		return p // probably more to come
 	}
 
@@ -193,7 +245,7 @@ func (s *Session) finish(q *query, p Page) Page {
 	p.Tags = q.tags
 	p.Total = q.total
 	p.NumCols = q.ncols
-	p.Elapsed = time.Since(q.start)
+	p.Elapsed = q.elapsed + time.Since(q.start)
 	q.cancel()
 	if s.q == q {
 		s.q = nil
