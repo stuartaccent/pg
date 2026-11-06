@@ -125,6 +125,10 @@ func Open(ctx context.Context, dsn string) (*pgconn.PgConn, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Tells pg's own connections apart in the activity list.
+	if cfg.RuntimeParams["application_name"] == "" {
+		cfg.RuntimeParams["application_name"] = "pg"
+	}
 	cfg.BuildContextWatcherHandler = func(c *pgconn.PgConn) ctxwatch.Handler {
 		// If the server hasn't answered the cancel request within DeadlineDelay,
 		// fall back to breaking the connection so the UI never hangs.

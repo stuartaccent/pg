@@ -15,6 +15,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"pg/internal/catalog"
 	"pg/internal/conn"
 	"pg/internal/session"
 )
@@ -44,6 +45,55 @@ func TestNotConnected(t *testing.T) {
 	}
 	if got := get(t, s, http.MethodGet, "/completions").Body.String(); !strings.Contains(got, `"schemas":null`) {
 		t.Errorf("completions = %q", got)
+	}
+}
+
+func TestActivityNeedsAConnection(t *testing.T) {
+	if body := get(t, New(), http.MethodGet, "/activity").Body.String(); !strings.Contains(body, "connect to a service first") {
+		t.Errorf("activity = %q", body)
+	}
+	if body := get(t, New(), http.MethodPost, "/activity/1/terminate").Body.String(); !strings.Contains(body, "connect to a service first") {
+		t.Errorf("terminate = %q", body)
+	}
+}
+
+func TestStopBackendRefuses(t *testing.T) {
+	s := New()
+	for _, url := range []string{"/activity/x/cancel", "/activity/1/explode"} {
+		if got := get(t, s, http.MethodPost, url).Code; got != http.StatusNotFound {
+			t.Errorf("%s status = %d", url, got)
+		}
+	}
+	// Past the read-only check, this would report the connect error alone.
+	s.readOnly = true
+	s.cat = catalog.New(func(context.Context) (*pgconn.PgConn, error) { return nil, errors.New("no server here") })
+	if body := get(t, s, http.MethodPost, "/activity/1/terminate").Body.String(); !strings.Contains(body, "read-only") {
+		t.Errorf("terminate = %q", body)
+	}
+}
+
+func TestActivityButtons(t *testing.T) {
+	backends := []catalog.Backend{
+		{PID: 1, State: "active", Query: "select 1"},
+		{PID: 2, State: "idle"},
+	}
+	var writable, readOnly strings.Builder
+	if err := ActivityBody(backends, true, nil).Render(context.Background(), &writable); err != nil {
+		t.Fatal(err)
+	}
+	if err := ActivityBody(backends, false, nil).Render(context.Background(), &readOnly); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"/activity/1/cancel", "/activity/1/terminate", "/activity/2/terminate"} {
+		if !strings.Contains(writable.String(), want) {
+			t.Errorf("no %s", want)
+		}
+	}
+	if strings.Contains(writable.String(), "/activity/2/cancel") {
+		t.Error("an idle connection has nothing to cancel")
+	}
+	if strings.Contains(readOnly.String(), "/activity/") {
+		t.Error("read-only should have no buttons")
 	}
 }
 

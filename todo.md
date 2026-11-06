@@ -90,6 +90,11 @@ Built along the way, outside the lists above.
 - [x] Autocomplete column names without a table prefix, from the tables in the statement under the cursor.
 - [x] Keep 2,000 statements of history, up to about 2MB, so it can't crowd out tabs' SQL.
 
+### Server
+
+- [x] Activity dialog: every connection on the server, refreshing every 2 seconds, showing what's blocking what, with Cancel and Terminate.
+- [x] Roles in the tree: memberships, grants in this database, and a definition without the password.
+
 ### Connections
 
 - [x] Config menu to open the service and password files in a text editor.

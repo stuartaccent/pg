@@ -1,5 +1,5 @@
 // Package catalog reads the object tree of the connected database from the
-// system catalogs, one level at a time.
+// system catalogs, one level at a time, and what's happening on its server.
 //
 // It has its own connection because a session's is tied up while a result is
 // being paged, and running anything else on it would cancel that result.
@@ -60,11 +60,19 @@ var groups = map[string][]Node{
 		{Label: "Columns", Kind: "columns"},
 		{Label: "Indexes", Kind: "indexes"},
 	},
+	"role": {
+		{Label: "Member of", Kind: "memberof"},
+		{Label: "Members", Kind: "members"},
+		{Label: "Grants in this database", Kind: "grants"},
+	},
 }
 
 const (
 	// userSchema hides pg_catalog, pg_toast and the like, as pgAdmin does by default.
 	userSchema = `n.nspname !~ '^pg_' and n.nspname <> 'information_schema'`
+	// ownRole hides the roles Postgres comes with. r is pg_roles, which unlike
+	// pg_authid never gives out password hashes.
+	ownRole = `r.rolname !~ '^pg_'`
 	// ownFunction hides functions that belong to an extension, of which there
 	// can be hundreds. p is pg_proc.
 	ownFunction = `p.prokind in ('f', 'p') and not exists (
@@ -123,14 +131,76 @@ func functions(filter, detail string) string {
 }
 
 // queries return one row per node: label, detail, sql, kind, id, def. A kind's
-// id, if it has one, is bound as $1: a schema name, a relation's oid or a
-// search term.
+// id, if it has one, is bound as $1: a schema name, a relation's or role's oid,
+// or a search term.
 var queries = map[string]string{
+	// Roles belong to the server, so they sit beside the schemas, not in one.
 	RootKind: `
-		select n.nspname, '', '', 'schema', n.nspname, ''
-		from pg_namespace n
-		where ` + userSchema + `
+		select label, detail, '', kind, id, ''
+		from (
+			select n.nspname::text label, '' detail, 'schema' kind, n.nspname::text id, 1 ord
+			from pg_namespace n
+			where ` + userSchema + `
+			union all
+			select 'Roles', count(*)::text, 'roles', '', 2
+			from pg_roles r
+			where ` + ownRole + `
+		) found
+		order by ord, label collate "C"`,
+	"roles": `
+		select r.rolname, concat_ws(', ', case when r.rolsuper then 'superuser' end, case when r.rolcanlogin then 'login' end),
+			'', 'role', r.oid::text, 'role'
+		from pg_roles r
+		where ` + ownRole + `
 		order by 1`,
+	// grouped as Postgres 16 can record a membership once per grantor.
+	"memberof": `
+		select r.rolname, case when bool_or(m.admin_option) then 'with admin option' else '' end,
+			'', '', r.oid::text, 'role'
+		from pg_auth_members m
+		join pg_roles r on r.oid = m.roleid
+		where m.member = $1
+		group by r.oid, r.rolname
+		order by 1`,
+	"members": `
+		select r.rolname, case when bool_or(m.admin_option) then 'with admin option' else '' end,
+			'', '', r.oid::text, 'role'
+		from pg_auth_members m
+		join pg_roles r on r.oid = m.member
+		where m.roleid = $1
+		group by r.oid, r.rolname
+		order by 1`,
+	// An owner's rights go without saying, so those aren't listed as grants.
+	// shortcut: leaves out column grants and default privileges, add them if
+	// they're ever what's being looked for.
+	"grants": `
+		select o.what, string_agg(lower(a.privilege_type), ', ' order by a.privilege_type), '', '', '', ''
+		from (
+			select 1 ord, 'database ' || quote_ident(d.datname) what, d.datacl acl, d.datdba owner
+			from pg_database d
+			where d.datname = current_database()
+			union all
+			select 2, 'schema ' || quote_ident(n.nspname), n.nspacl, n.nspowner
+			from pg_namespace n
+			where ` + userSchema + `
+			union all
+			select 3, case c.relkind when 'S' then 'sequence ' when 'v' then 'view ' when 'm' then 'matview ' else 'table ' end
+					|| format('%I.%I', n.nspname, c.relname),
+				c.relacl, c.relowner
+			from pg_class c
+			join pg_namespace n on n.oid = c.relnamespace
+			where c.relkind in ('r', 'p', 'v', 'm', 'S', 'f') and c.relacl is not null and ` + userSchema + `
+			union all
+			select 4, format('function %I.%I(%s)', n.nspname, p.proname, pg_get_function_identity_arguments(p.oid)),
+				p.proacl, p.proowner
+			from pg_proc p
+			join pg_namespace n on n.oid = p.pronamespace
+			where p.proacl is not null and ` + ownFunction + ` and ` + userSchema + `
+		) o
+		cross join lateral aclexplode(o.acl) a
+		where a.grantee = $1 and a.grantee <> o.owner
+		group by o.ord, o.what
+		order by o.ord, o.what`,
 	"schema": `
 		select g.label, g.total::text, '', g.kind, n.nspname::text, ''
 		from pg_namespace n
@@ -234,6 +304,11 @@ var queries = map[string]string{
 			join pg_namespace n on n.oid = t.typnamespace
 			where (` + ownDomain + ` or ` + ownType + `) and ` + userSchema + `
 				and position(lower($1) in lower(t.typname)) > 0
+			union all
+			select r.rolname, 'role', '', '', r.oid::text, 'role'
+			from pg_roles r
+			where ` + ownRole + `
+				and position(lower($1) in lower(r.rolname)) > 0
 		) found
 		order by 1, 2
 		limit 200`,
@@ -241,6 +316,33 @@ var queries = map[string]string{
 
 // definitions return one row and column: the object's SQL. $1 is its oid.
 var definitions = map[string]string{
+	// shortcut: a list setting such as search_path comes out as one quoted
+	// value, which is fine to read but needs splitting before it's run.
+	"role": `
+		select concat_ws(E'\n',
+			'-- Rebuilt from the catalogs: passwords are never shown.',
+			format('create role %I%s;', r.rolname, concat(
+				case when r.rolsuper then ' superuser' end,
+				case when r.rolcanlogin then ' login' end,
+				case when r.rolcreatedb then ' createdb' end,
+				case when r.rolcreaterole then ' createrole' end,
+				case when r.rolreplication then ' replication' end,
+				case when r.rolbypassrls then ' bypassrls' end,
+				case when not r.rolinherit then ' noinherit' end,
+				case when r.rolconnlimit >= 0 then ' connection limit ' || r.rolconnlimit end,
+				case when r.rolvaliduntil is not null then format(' valid until %L', r.rolvaliduntil) end)),
+			(select string_agg(format('alter role %I set %s to %L;', r.rolname, split_part(s, '=', 1), substr(s, position('=' in s) + 1)), E'\n')
+				from unnest(r.rolconfig) s),
+			(select string_agg(format('grant %I to %I%s;', g.rolname, r.rolname, case when m.admin then ' with admin option' else '' end), E'\n' order by g.rolname)
+				from (
+					select roleid, bool_or(admin_option) admin
+					from pg_auth_members
+					where member = r.oid
+					group by roleid
+				) m
+				join pg_roles g on g.oid = m.roleid))
+		from pg_roles r
+		where r.oid = $1`,
 	"function": `select rtrim(pg_get_functiondef($1::oid), E'\n') || ';'`,
 	"view": `
 		select format(E'create or replace view %I.%I as\n%s', n.nspname, c.relname, pg_get_viewdef(c.oid, true))

@@ -16,7 +16,8 @@ import (
 )
 
 // These tests need a real server. Set PGIDE_TEST_SERVICE to a service name
-// from your pg_service.conf; they only run read-only statements and temp objects.
+// from your pg_service.conf; they only run read-only statements, temp objects
+// and work that's rolled back.
 func newTestCatalog(t *testing.T) *Catalog {
 	t.Helper()
 	service := os.Getenv("PGIDE_TEST_SERVICE")
@@ -47,7 +48,11 @@ func labels(nodes []Node) []string {
 
 func TestRootHidesSystemSchemas(t *testing.T) {
 	c := newTestCatalog(t)
-	for _, n := range children(t, c, RootKind, "") {
+	root := children(t, c, RootKind, "")
+	if last := root[len(root)-1]; last.Label != "Roles" || last.Kind != "roles" {
+		t.Errorf("last node = %+v, want Roles", last)
+	}
+	for _, n := range root[:len(root)-1] {
 		if strings.HasPrefix(n.Label, "pg_") || n.Label == "information_schema" {
 			t.Errorf("system schema %q listed", n.Label)
 		}
@@ -389,4 +394,142 @@ func TestReconnectsWithoutFailing(t *testing.T) {
 	}
 	time.Sleep(100 * time.Millisecond)
 	children(t, c, RootKind, "")
+}
+
+// Roles can't be temporary, so these only exist inside a transaction.
+func TestRoles(t *testing.T) {
+	c := newTestCatalog(t)
+	children(t, c, RootKind, "") // opens the connection
+	exec := func(sql string) error {
+		_, err := c.conn.Exec(context.Background(), sql).ReadAll()
+		return err
+	}
+	if err := exec("begin"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = exec("rollback") })
+	if err := exec(`
+		create role pgide_group noinherit;
+		create role pgide_member login connection limit 3 password 'pgide-secret';
+		grant pgide_group to pgide_member with admin option;
+		alter role pgide_member set work_mem to '64MB';
+		grant usage on schema public to pgide_member`); err != nil {
+		t.Skipf("can't create roles here: %v", err)
+	}
+
+	byLabel := map[string]Node{}
+	for _, n := range children(t, c, "roles", "") {
+		if strings.HasPrefix(n.Label, "pg_") {
+			t.Errorf("built-in role %q listed", n.Label)
+		}
+		byLabel[n.Label] = n
+	}
+	member, group := byLabel["pgide_member"], byLabel["pgide_group"]
+	if member.Detail != "login" || member.Kind != "role" || member.Def != "role" {
+		t.Errorf("member node = %+v", member)
+	}
+	if got := labels(children(t, c, "role", member.ID)); !slices.Equal(got, []string{"Member of", "Members", "Grants in this database"}) {
+		t.Errorf("role groups = %q", got)
+	}
+	if got := children(t, c, "memberof", member.ID); len(got) != 1 || got[0].Label != "pgide_group" || got[0].Detail != "with admin option" {
+		t.Errorf("member of = %+v", got)
+	}
+	if got := children(t, c, "members", group.ID); len(got) != 1 || got[0].Label != "pgide_member" {
+		t.Errorf("members = %+v", got)
+	}
+	if got := children(t, c, "grants", member.ID); len(got) != 1 || got[0].Label != "schema public" || got[0].Detail != "usage" {
+		t.Errorf("grants = %+v", got)
+	}
+	if got := children(t, c, SearchKind, "pgide_mem"); len(got) != 1 || got[0].Def != "role" {
+		t.Errorf("search = %+v", got)
+	}
+
+	def, err := c.Definition(context.Background(), "role", member.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"create role pgide_member login connection limit 3;",
+		"alter role pgide_member set work_mem to '64MB';",
+		"grant pgide_group to pgide_member with admin option;",
+	} {
+		if !strings.Contains(def, want) {
+			t.Errorf("definition lacks %q:\n%s", want, def)
+		}
+	}
+	if strings.Contains(def, "pgide-secret") || strings.Contains(def, "SCRAM") {
+		t.Errorf("definition shows the password:\n%s", def)
+	}
+}
+
+func TestActivityShowsBlockingAndStops(t *testing.T) {
+	c := newTestCatalog(t)
+	ctx := context.Background()
+	open := func() *pgconn.PgConn {
+		other, err := conn.Open(ctx, conn.ServiceDSN(os.Getenv("PGIDE_TEST_SERVICE")))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = other.Close(ctx) })
+		return other
+	}
+	const lock = "select pg_advisory_lock(7306115)"
+	holder, waiter := open(), open()
+	if _, err := holder.Exec(ctx, lock).ReadAll(); err != nil {
+		t.Fatal(err)
+	}
+	waited := make(chan error, 1)
+	go func() {
+		_, err := waiter.Exec(ctx, lock).ReadAll()
+		waited <- err
+	}()
+
+	find := func(pid uint32) (Backend, bool) {
+		backends, err := c.Activity(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		i := slices.IndexFunc(backends, func(b Backend) bool { return b.PID == int(pid) })
+		if i < 0 {
+			return Backend{}, false
+		}
+		return backends[i], true
+	}
+	var blocked Backend
+	for deadline := time.Now().Add(5 * time.Second); blocked.BlockedBy == "" && time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		blocked, _ = find(waiter.PID())
+	}
+	if blocked.BlockedBy != fmt.Sprint(holder.PID()) || blocked.State != "active" || blocked.Query != lock || blocked.App != "pg" || blocked.For == "" {
+		t.Fatalf("blocked = %+v", blocked)
+	}
+
+	if err := c.Stop(ctx, int(waiter.PID()), false); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-waited:
+		if err == nil || !strings.Contains(err.Error(), "canceling") {
+			t.Errorf("cancelled query: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("cancel didn't stop the query")
+	}
+	if _, ok := find(waiter.PID()); !ok {
+		t.Error("cancelling should leave the connection")
+	}
+
+	if err := c.Stop(ctx, int(waiter.PID()), true); err != nil {
+		t.Fatal(err)
+	}
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		if _, ok := find(waiter.PID()); !ok {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("terminate didn't end the connection")
+		}
+	}
+	if err := c.Stop(ctx, 1, false); err == nil {
+		t.Error("stopping a pid that isn't a connection: want an error")
+	}
 }

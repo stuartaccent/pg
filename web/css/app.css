@@ -21,6 +21,11 @@
     @apply cursor-pointer hover:bg-base-200;
 }
 
+/* A query's line breaks would make rows jump about as the list refreshes. */
+#activity-body td {
+    white-space: nowrap;
+}
+
 /* The last tab stays open: there's nowhere to go without one. */
 #tabs:has(> :only-child) .tab-close {
     display: none;

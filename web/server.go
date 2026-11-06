@@ -77,6 +77,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /tree", s.tree)
 	mux.HandleFunc("GET /definition", s.definition)
 	mux.HandleFunc("GET /completions", s.completions)
+	mux.HandleFunc("GET /activity", s.activity)
+	mux.HandleFunc("POST /activity/{pid}/{action}", s.stopBackend)
 	return noStore(mux)
 }
 
@@ -448,6 +450,51 @@ func (s *Server) completions(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(done)
+}
+
+func (s *Server) activity(w http.ResponseWriter, r *http.Request) {
+	s.renderActivity(w, r, nil)
+}
+
+// renderActivity lists the server's connections, after any stopErr.
+func (s *Server) renderActivity(w http.ResponseWriter, r *http.Request, stopErr error) {
+	s.mu.Lock()
+	cat, readOnly := s.cat, s.readOnly
+	s.mu.Unlock()
+	if cat == nil {
+		render(w, r, ActivityBody(nil, false, errors.New("connect to a service first")))
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	backends, err := cat.Activity(ctx)
+	render(w, r, ActivityBody(backends, !readOnly, errors.Join(stopErr, err)))
+}
+
+// stopBackend cancels a connection's query or ends the connection. Neither
+// writes anything, but read-only is there to keep a live service safe from
+// slips, and this could stop someone's work.
+func (s *Server) stopBackend(w http.ResponseWriter, r *http.Request) {
+	pid, err := strconv.Atoi(r.PathValue("pid"))
+	action := r.PathValue("action")
+	if err != nil || (action != "cancel" && action != "terminate") {
+		http.NotFound(w, r)
+		return
+	}
+	s.mu.Lock()
+	cat, readOnly := s.cat, s.readOnly
+	s.mu.Unlock()
+	switch {
+	case cat == nil:
+		err = errors.New("connect to a service first")
+	case readOnly:
+		err = errors.New("this service is read-only")
+	default:
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+		err = cat.Stop(ctx, pid, action == "terminate")
+	}
+	s.renderActivity(w, r, err)
 }
 
 func render(w http.ResponseWriter, r *http.Request, c templ.Component) {
