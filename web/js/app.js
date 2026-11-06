@@ -102,7 +102,7 @@ function selectTab(id) {
 
 async function closeTab(id) {
 	if (views.size === 1) return;
-	if (views.get(id).state.doc.length > 0 && !(await ask("Close this tab and discard its SQL?"))) return;
+	if (views.get(id).state.doc.length > 0 && !(await ask("Close this tab and discard its SQL?", true))) return;
 	await removeTab(id);
 	if (activeTab === id) selectTab([...views.keys()].at(-1));
 	saveTabs();
@@ -119,7 +119,7 @@ async function removeTab(id) {
 // There's always a tab, so the first one stays, emptied.
 async function closeAllTabs() {
 	const hasSQL = [...views.values()].some((view) => view.state.doc.length > 0);
-	if (hasSQL && !(await ask("Close all tabs and discard their SQL?"))) return;
+	if (hasSQL && !(await ask("Close all tabs and discard their SQL?", true))) return;
 	const [kept, ...others] = views.keys();
 	await Promise.all(others.map(removeTab));
 	await fetch(`/tabs/${kept}`, { method: "DELETE" }); // ends its session, and any query running in it
@@ -131,12 +131,14 @@ async function closeAllTabs() {
 }
 
 // ask shows the confirm dialog and resolves to whether the user continued.
-// Not confirm(), which webviews don't have to implement.
-function ask(message) {
+// Not confirm(), which webviews don't have to implement. Enter means Cancel
+// unless enterContinues: a held ⌘+Enter mustn't wave through a risky query.
+function ask(message, enterContinues = false) {
 	const dialog = document.querySelector("#confirm");
 	document.querySelector("#confirm-text").textContent = message;
 	dialog.returnValue = "";
 	dialog.showModal();
+	if (enterContinues) dialog.querySelector("button[value=yes]").focus();
 	return new Promise((resolve) => {
 		dialog.addEventListener("close", () => resolve(dialog.returnValue === "yes"), { once: true });
 	});
