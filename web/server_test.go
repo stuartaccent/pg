@@ -216,6 +216,77 @@ func TestQueriesInSubfolders(t *testing.T) {
 	}
 }
 
+func TestSaveQueryWithTheDialog(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	root := filepath.Join(home, "pg-queries")
+	s := New()
+	save := func(name, text string) *httptest.ResponseRecorder {
+		return postForm(s, "/queries/choose", url.Values{"name": {name}, "text": {text}})
+	}
+
+	if got := save("", "select 1").Code; got != http.StatusNotImplemented {
+		t.Errorf("no dialog = %d", got)
+	}
+
+	var offered [2]string
+	chosen := ""
+	s.ChooseFile = func(dir, name string) (string, error) {
+		offered = [2]string{dir, name}
+		return chosen, nil
+	}
+
+	// Cancelling writes nothing.
+	if w := save("", "select 1"); w.Code != http.StatusNoContent {
+		t.Errorf("cancelled = %d", w.Code)
+	}
+	if filepath.Clean(offered[0]) != root || offered[1] != "Untitled.sql" {
+		t.Errorf("offered %q", offered)
+	}
+
+	chosen = filepath.Join(root, "stats", "Sizes.sql")
+	if w := save("", "select 1"); w.Code != http.StatusOK || w.Body.String() != "stats/Sizes" {
+		t.Fatalf("save = %d %q", w.Code, w.Body)
+	}
+
+	// Saving again offers the same place, and the dialog has already asked
+	// about replacing it.
+	if w := save("stats/Sizes", "select 2"); w.Body.String() != "stats/Sizes" {
+		t.Errorf("save again = %q", w.Body)
+	}
+	if filepath.Clean(offered[0]) != filepath.Join(root, "stats") || offered[1] != "Sizes.sql" {
+		t.Errorf("offered %q", offered)
+	}
+	if got, _ := os.ReadFile(chosen); string(got) != "select 2" {
+		t.Errorf("file = %q", got)
+	}
+
+	// A hint from the page can't move where the dialog starts.
+	save("../../etc/passwd", "select 3")
+	if filepath.Clean(offered[0]) != root || offered[1] != "Untitled.sql" {
+		t.Errorf("offered %q", offered)
+	}
+
+	// Without its extension it wasn't what the dialog asked about.
+	chosen = filepath.Join(root, "stats", "Sizes")
+	if w := save("", "select 4"); w.Code != http.StatusInternalServerError {
+		t.Errorf("gained extension = %d %q", w.Code, w.Body)
+	}
+	if got, _ := os.ReadFile(chosen + ".sql"); string(got) != "select 3" {
+		t.Errorf("replaced without asking: %q", got)
+	}
+
+	// Elsewhere is allowed, but it's no longer a name in the folder.
+	chosen = filepath.Join(home, "elsewhere.sql")
+	if w := save("", "select 5"); w.Body.String() != chosen {
+		t.Errorf("outside = %q", w.Body)
+	}
+
+	if w := save("", "  "); w.Code != http.StatusBadRequest {
+		t.Errorf("empty tab = %d", w.Code)
+	}
+}
+
 func TestOpenQueriesFolder(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -369,11 +440,11 @@ func TestCancellingTheExportDialog(t *testing.T) {
 		return nil, errors.New("no")
 	}
 	choose := func() *httptest.ResponseRecorder { return postForm(s, "/export/choose", url.Values{"tab": {"1"}}) }
-	s.ChooseExport = func(string) (string, error) { return "", nil }
+	s.ChooseFile = func(_, _ string) (string, error) { return "", nil }
 	if w := choose(); w.Code != http.StatusNoContent || w.Header().Get("HX-Trigger") != "" {
 		t.Errorf("cancelled = %d, trigger %q", w.Code, w.Header().Get("HX-Trigger"))
 	}
-	s.ChooseExport = func(string) (string, error) { return "", errors.New("no dialog") }
+	s.ChooseFile = func(_, _ string) (string, error) { return "", errors.New("no dialog") }
 	if body := choose().Body.String(); !strings.Contains(body, "no dialog") {
 		t.Errorf("failure not shown: %q", body)
 	}
@@ -387,7 +458,7 @@ func TestExportStartsOnceAPlaceIsChosen(t *testing.T) {
 		return nil, errors.New("no server here")
 	}
 	dir := t.TempDir()
-	s.ChooseExport = func(string) (string, error) { return filepath.Join(dir, "out.csv"), nil }
+	s.ChooseFile = func(_, _ string) (string, error) { return filepath.Join(dir, "out.csv"), nil }
 	form := url.Values{"tab": {"1"}, "sql": {"select 1"}}
 
 	// The page can't skip the dialog, or name a path of its own.

@@ -228,7 +228,7 @@ templ tabPanel(id string) {
 			<span class="hidden" hx-post="/export" hx-trigger={ "export-ready from:#export-" + id } hx-include={ "#editor-" + id } hx-target={ "#notice-" + id } hx-indicator={ "#running-" + id }></span>
 			<button type="button" class="btn btn-ghost btn-sm" onclick="showHistory()">History</button>
 			<button type="button" class="btn btn-ghost btn-sm" onclick="showQueries()">Queries</button>
-			<button type="button" class="btn btn-ghost btn-sm" onclick="showSaveQuery()">Save</button>
+			<button type="button" class="btn btn-ghost btn-sm" onclick="saveQuery()">Save</button>
 			<span id={ "running-" + id } class="htmx-indicator flex items-center gap-1 text-base-content/60">
 				<span class="loading loading-spinner loading-xs"></span>
 				Running… <span class="timer tabular-nums"></span>
@@ -355,7 +355,7 @@ templ QueriesBody(dir string, names []string, err error) {
 		}
 		for _, name := range names {
 			<li>
-				<button type="button" class="text-left truncate w-full py-1 cursor-pointer hover:underline" title={ name } data-url={ "/queries/" + url.PathEscape(name) } onclick="document.querySelector('#queries').close(); useDefinition(event, this)">{ name }</button>
+				<button type="button" class="text-left truncate w-full py-1 cursor-pointer hover:underline" title={ name } data-name={ name } data-url={ "/queries/" + url.PathEscape(name) } onclick="useQuery(event, this)">{ name }</button>
 			</li>
 		}
 	</ul>

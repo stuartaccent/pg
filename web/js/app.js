@@ -119,6 +119,7 @@ async function removeTab(id) {
 	await fetch(`/tabs/${id}`, { method: "DELETE" });
 	views.get(id).destroy();
 	views.delete(id);
+	tabQueries.delete(id);
 	document.querySelector(`[data-tab="${id}"]`).remove();
 	document.querySelector(`[data-tab-button="${id}"]`).remove();
 }
@@ -131,6 +132,7 @@ async function closeAllTabs() {
 	await Promise.all(others.map(removeTab));
 	await fetch(`/tabs/${kept}`, { method: "DELETE" }); // ends its session, and any query running in it
 	setText(views.get(kept), "");
+	tabQueries.delete(kept);
 	document.querySelector(`#results-${kept}`).replaceChildren();
 	document.querySelector(`#notice-${kept}`).replaceChildren();
 	selectTab(kept);
@@ -236,16 +238,47 @@ async function showQueries() {
 	showUnfocused(document.querySelector("#queries"));
 }
 
-function showSaveQuery() {
-	document.querySelector("#save-name").value = "";
-	document.querySelector("#save-text").value = views.get(activeTab).state.doc.toString();
+// Which saved query each tab holds, to offer its name when saving again.
+const tabQueries = new Map();
+
+async function useQuery(event, el) {
+	document.querySelector("#queries").close();
+	await useDefinition(event, el);
+	tabQueries.set(activeTab, el.dataset.name);
+}
+
+// Saves with the app's Save dialog, or the page's own in a browser.
+async function saveQuery() {
+	const tab = activeTab;
+	const name = tabQueries.get(tab) ?? "";
+	const text = views.get(tab).state.doc.toString();
+	const res = await fetch("/queries/choose", { method: "POST", body: new URLSearchParams({ name, text }) });
+	if (res.status === 501) {
+		showSaveQuery(name, text);
+		return;
+	}
+	if (res.status === 204) return;
+	const answer = (await res.text()).trim();
+	document.querySelector(`#notice-${tab}`).textContent = res.ok ? `Saved ${answer}` : answer;
+	if (res.ok) {
+		// Somewhere outside the folder isn't a name it can be offered under.
+		if (answer.startsWith("/")) tabQueries.delete(tab);
+		else tabQueries.set(tab, answer);
+	}
+}
+
+function showSaveQuery(name, text) {
+	document.querySelector("#save-name").value = name;
+	document.querySelector("#save-text").value = text;
 	document.querySelector("#save-status").replaceChildren();
 	document.querySelector("#save-query").showModal();
 }
 
 document.addEventListener("query-saved", () => {
 	document.querySelector("#save-query").close();
-	document.querySelector(`#notice-${activeTab}`).textContent = `Saved ${document.querySelector("#save-name").value.trim()}`;
+	const name = document.querySelector("#save-name").value.trim().replace(/\.sql$/, "");
+	tabQueries.set(activeTab, name);
+	document.querySelector(`#notice-${activeTab}`).textContent = `Saved ${name}`;
 });
 
 async function showActivity() {
@@ -379,7 +412,7 @@ async function useDefinition(event, el) {
 	event.preventDefault();
 	const res = await fetch(el.dataset.url);
 	const text = await res.text();
-	openSQL(res.ok ? text : `-- ${text.trim().replaceAll("\n", "\n-- ")}`);
+	await openSQL(res.ok ? text : `-- ${text.trim().replaceAll("\n", "\n-- ")}`);
 }
 
 // Reloads what the editors complete from, after a connect or refresh.
@@ -445,7 +478,7 @@ document.addEventListener("keydown", (event) => {
 	resize(bar, sizeOf(bar) + step);
 });
 
-Object.assign(window, { fromMenu, newTab, closeActiveTab, selectTab, closeTab, closeAllTabs, useSQL, useDefinition, resetTree, formatSQL, showHistory, showQueries, showSaveQuery, showActivity, activityLive, showBackups, showRestore, closeRestore, showReplace, checkReplace, closeReplace, renderHistory, copyCell });
+Object.assign(window, { fromMenu, newTab, closeActiveTab, selectTab, closeTab, closeAllTabs, useSQL, useDefinition, resetTree, formatSQL, showHistory, showQueries, useQuery, saveQuery, showActivity, activityLive, showBackups, showRestore, closeRestore, showReplace, checkReplace, closeReplace, renderHistory, copyCell });
 
 // Wails holds back the menu's commands until its runtime says the page is ready.
 // This page doesn't load that runtime, so it says so itself.

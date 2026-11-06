@@ -4,6 +4,8 @@ package main
 import (
 	_ "embed"
 	"log"
+	"path/filepath"
+	"strings"
 	"sync/atomic"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -54,12 +56,16 @@ func main() {
 	})
 	app.Menu.Set(appMenu(app))
 
-	srv.ChooseExport = func(name string) (string, error) {
-		return app.Dialog.SaveFile().
+	srv.ChooseFile = func(dir, name string) (string, error) {
+		ext := filepath.Ext(name)
+		dialog := app.Dialog.SaveFile().
 			SetFilename(name).
-			AddFilter("CSV", "*.csv").
-			CanCreateDirectories(true).
-			PromptForSingleSelection()
+			AddFilter(strings.ToUpper(ext[1:]), "*"+ext).
+			CanCreateDirectories(true)
+		if dir != "" {
+			dialog.SetDirectory(dir)
+		}
+		return dialog.PromptForSingleSelection()
 	}
 
 	// Options.Icon alone doesn't reach the Dock: run outside an app bundle, macOS
@@ -128,7 +134,7 @@ func appMenu(app *application.App) *application.Menu {
 	add("Close Tab", "CmdOrCtrl+W", "closeActiveTab")
 	add("Close All Tabs", "", "closeAllTabs")
 	file.AddSeparator()
-	add("Save Query…", "CmdOrCtrl+S", "showSaveQuery")
+	add("Save Query…", "CmdOrCtrl+S", "saveQuery")
 	add("Saved Queries…", "", "showQueries")
 	add("History…", "", "showHistory")
 	file.AddSeparator()
