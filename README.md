@@ -2,6 +2,8 @@
 
 A personal Postgres IDE: Wails v3 window, templ + HTMX UI, pgx underneath.
 
+![pg showing a table in the browser tree, a query and its results](docs/screenshot.png)
+
 Connections come from `~/.pg_service.conf` (or `$PGSERVICEFILE`), passwords from `~/.pgpass`, so the app stores no credentials of its own.
 
 ```ini
