@@ -189,7 +189,9 @@ templ Index(services []string, current string, readOnly bool, j jobView, err err
 			<dialog id="history" class="modal">
 				<div class="modal-box max-w-4xl">
 					<input id="history-search" type="search" class="input input-sm w-full" placeholder="Search history…" aria-label="Search history" oninput="renderHistory()"/>
-					<ul id="history-list" class="mt-2 max-h-[60vh] overflow-auto"></ul>
+					<!-- The padding is room for a pressed button, which moves down a little.
+					     Without it the last row overflows, and the scrollbar moves ✕ away mid-click. -->
+					<ul id="history-list" class="mt-2 pb-1 max-h-[60vh] overflow-auto"></ul>
 				</div>
 				<form method="dialog" class="modal-backdrop"><button aria-label="Close">close</button></form>
 			</dialog>
