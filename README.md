@@ -58,10 +58,11 @@ mkdir -p tmp && curl -fsSLo tmp/tailwindcss https://github.com/tailwindlabs/tail
 
 ## Test
 
-The session tests need a real server and are skipped otherwise:
+Tests that need a real server name a service from your service file, and are skipped without one. The Docker tests also need Docker, and only use throwaway containers.
 
 ```sh
-PGIDE_TEST_SERVICE=local go test -race ./...
+PGIDE_TEST_SERVICE=your-service go test -race ./...
+npm test
 ```
 
 ## Using it

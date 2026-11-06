@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -549,5 +550,44 @@ func TestReplaceButton(t *testing.T) {
 	s.settings.Database, s.readOnly = "live", true
 	if body := get(t, s, http.MethodGet, "/backups").Body.String(); strings.Contains(body, ">Replace<") {
 		t.Error("offered replacing on a read-only service")
+	}
+}
+
+func TestStopArrivingTooLateKeepsTheResult(t *testing.T) {
+	s := New()
+	finishing := make(chan struct{})
+	j, err := s.start("swap", func(ctx context.Context, progress func(string)) (jobResult, error) {
+		close(finishing)
+		<-ctx.Done() // Stop lands here, and the work finishes anyway
+		return jobResult{Text: "replaced"}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-finishing
+	j.cancel()
+	<-j.finished
+	if v := j.view(); v.Err != nil || v.Result.Text != "replaced" {
+		t.Errorf("view = %+v", v)
+	}
+}
+
+func TestCloseWaitsForAJobToCleanUp(t *testing.T) {
+	s := New()
+	var cleaned atomic.Bool
+	started := make(chan struct{})
+	if _, err := s.start("backup", func(ctx context.Context, progress func(string)) (jobResult, error) {
+		close(started)
+		<-ctx.Done()
+		time.Sleep(50 * time.Millisecond) // removing what it made
+		cleaned.Store(true)
+		return jobResult{}, ctx.Err()
+	}); err != nil {
+		t.Fatal(err)
+	}
+	<-started
+	s.Close()
+	if !cleaned.Load() {
+		t.Error("Close returned before the job had cleaned up")
 	}
 }

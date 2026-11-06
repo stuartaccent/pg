@@ -255,3 +255,52 @@ func TestConnectsOnFirstUse(t *testing.T) {
 		t.Fatalf("page = %+v", p)
 	}
 }
+
+// terminate ends a session's connection from outside, as a server restart would.
+func terminate(t *testing.T, s *Session) {
+	t.Helper()
+	p := s.Run("select pg_backend_pid()")
+	if p.Err != nil {
+		t.Fatal(p.Err)
+	}
+	endBackend(t, s, p.Rows[0][0].Text)
+}
+
+func endBackend(t *testing.T, s *Session, pid string) {
+	t.Helper()
+	ctx := context.Background()
+	other, err := s.connect(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer other.Close(ctx)
+	if _, err := other.Exec(ctx, "select pg_terminate_backend("+pid+")").ReadAll(); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(100 * time.Millisecond)
+}
+
+func TestReconnectsWithoutFailingTheNextQuery(t *testing.T) {
+	s := newTestSession(t)
+	terminate(t, s)
+	if p := s.Run("select 1"); p.Err != nil || len(p.Rows) != 1 {
+		t.Fatalf("page = %+v", p)
+	}
+}
+
+func TestLosingATransactionIsReported(t *testing.T) {
+	s := newTestSession(t)
+	p := s.Run("begin; select pg_backend_pid()")
+	if p.Err != nil {
+		t.Fatal(p.Err)
+	}
+	endBackend(t, s, p.Rows[0][0].Text)
+
+	// Quietly reconnecting would commit this by itself, outside the transaction.
+	if p := s.Run("create temp table lost (id int)"); !errors.Is(p.Err, ErrTransactionLost) {
+		t.Fatalf("err = %v, want ErrTransactionLost", p.Err)
+	}
+	if p := s.Run("select to_regclass('pg_temp.lost') is null"); p.Err != nil || p.Rows[0][0].Text != "t" {
+		t.Fatalf("after: %+v", p)
+	}
+}

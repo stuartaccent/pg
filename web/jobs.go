@@ -16,16 +16,15 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"pg/internal/catalog"
 	"pg/internal/conn"
 	"pg/internal/dockerpg"
-	"pg/internal/session"
 )
 
 // job is a slow piece of work running in the background.
 type job struct {
-	label  string
-	cancel context.CancelFunc
+	label    string
+	cancel   context.CancelFunc
+	finished chan struct{} // closed once it has cleaned up after itself
 
 	mu     sync.Mutex
 	line   string // the latest progress
@@ -75,17 +74,20 @@ func (s *Server) start(label string, work func(context.Context, func(string)) (j
 		return nil, errors.New("wait for " + s.job.label + " to finish")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	j := &job{label: label, cancel: cancel}
+	j := &job{label: label, cancel: cancel, finished: make(chan struct{})}
 	s.job = j
 	go func() {
 		defer cancel()
 		result, err := work(ctx, j.progress)
-		if ctx.Err() != nil {
+		// Only if it failed: Stop can arrive too late, when the work has already
+		// finished, and that has to be reported as done.
+		if err != nil && ctx.Err() != nil {
 			err = errors.New("stopped") // the tools' own exit codes mean nothing here
 		}
 		j.mu.Lock()
 		defer j.mu.Unlock()
 		j.done, j.result, j.err = true, result, err
+		close(j.finished)
 	}()
 	return j, nil
 }
@@ -188,8 +190,6 @@ func (s *Server) backups(w http.ResponseWriter, r *http.Request) {
 }
 
 // openFolder shows path in the Finder. It's a variable for the tests.
-//
-// shortcut: macOS only, like openInEditor.
 var openFolder = func(path string) error {
 	return exec.Command("open", path).Run()
 }
@@ -373,30 +373,11 @@ func (s *Server) replaceBackup(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return jobResult{}, err
 		}
-		s.resetConnections(service)
 		return jobResult{
 			Text:   fmt.Sprintf("Replaced %s: %d tables, %d rows. The previous one is now %s, until you drop it.", database, len(report.Counts), report.Rows(), old),
 			Reload: true,
 		}, nil
 	})
-}
-
-// resetConnections swaps the sessions and catalog for fresh ones, if still on
-// service. A replace ends their connections, which they'd otherwise only
-// discover by failing the next thing they're asked to do.
-func (s *Server) resetConnections(service string) {
-	s.mu.Lock()
-	if s.service != service {
-		s.mu.Unlock()
-		return
-	}
-	sessions, cat := s.sessions, s.cat
-	s.sessions, s.cat = map[string]*session.Session{}, catalog.New(s.connect)
-	s.mu.Unlock()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	closeSessions(ctx, sessions)
-	_ = cat.Close(ctx)
 }
 
 // liveCounts counts a live database's rows, in a transaction that can't write.

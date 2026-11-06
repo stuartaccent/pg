@@ -12,6 +12,8 @@ import (
 	"sync"
 
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"pg/internal/conn"
 )
 
 const (
@@ -452,12 +454,12 @@ func (c *Catalog) read(ctx context.Context, sql string, params [][]byte) ([][][]
 	if c.closed {
 		return nil, ErrClosed
 	}
-	if c.conn == nil || c.conn.IsClosed() {
-		conn, err := c.connect(ctx)
+	if c.conn == nil || !conn.Alive(ctx, c.conn) {
+		fresh, err := c.connect(ctx)
 		if err != nil {
 			return nil, err
 		}
-		c.conn = conn
+		c.conn = fresh
 	}
 	res := c.conn.ExecParams(ctx, sql, params, nil, nil, nil).Read()
 	return res.Rows, res.Err

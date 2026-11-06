@@ -138,6 +138,12 @@ func Open(ctx context.Context, dsn string) (*pgconn.PgConn, error) {
 	return pgconn.ConnectConfig(ctx, cfg)
 }
 
+// Alive reports whether c still works. Asking the server is the only way to
+// know: a connection that was ended, by a restart say, looks fine until used.
+func Alive(ctx context.Context, c *pgconn.PgConn) bool {
+	return !c.IsClosed() && c.Ping(ctx) == nil
+}
+
 // Settings are the details of a connection, for handing to another program.
 type Settings struct {
 	Host     string

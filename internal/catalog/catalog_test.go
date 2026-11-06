@@ -3,10 +3,12 @@ package catalog
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
 
@@ -369,5 +371,22 @@ func TestBadInput(t *testing.T) {
 		t.Error("bad oid: want an error")
 	}
 	// The connection must survive that error.
+	children(t, c, RootKind, "")
+}
+
+func TestReconnectsWithoutFailing(t *testing.T) {
+	c := newTestCatalog(t)
+	ctx := context.Background()
+	children(t, c, RootKind, "")
+	pid := c.conn.PID()
+	other, err := c.connect(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer other.Close(ctx)
+	if _, err := other.Exec(ctx, fmt.Sprintf("select pg_terminate_backend(%d)", pid)).ReadAll(); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(100 * time.Millisecond)
 	children(t, c, RootKind, "")
 }

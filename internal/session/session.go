@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"pg/internal/conn"
 )
 
 // PageSize is the number of rows returned per page.
@@ -22,6 +24,10 @@ var ErrStale = errors.New("query is no longer running")
 // ErrOpenTransaction is returned by an Explain that would have to end the
 // transaction the session is in.
 var ErrOpenTransaction = errors.New("finish the open transaction first: explain analyze runs in one of its own and rolls it back")
+
+// ErrTransactionLost is returned once when the connection drops during a
+// transaction. The server has rolled it back, and the session starts again.
+var ErrTransactionLost = errors.New("the connection was lost, and the open transaction with it: nothing in it was committed")
 
 // ErrClosed is returned once the session has been closed.
 var ErrClosed = errors.New("session is closed")
@@ -172,13 +178,24 @@ func (s *Session) begin() (context.Context, *query, error) {
 		cancel()
 		return ctx, q, ErrClosed
 	}
-	if s.conn == nil || s.conn.IsClosed() {
-		conn, err := s.connect(ctx)
+	if s.conn != nil && !conn.Alive(ctx, s.conn) {
+		inTransaction := s.conn.TxStatus() != 'I'
+		_ = s.conn.Close(ctx)
+		s.conn = nil
+		// Reconnecting quietly here would run what comes next outside the
+		// transaction, where it would commit by itself.
+		if inTransaction {
+			cancel()
+			return ctx, q, ErrTransactionLost
+		}
+	}
+	if s.conn == nil {
+		fresh, err := s.connect(ctx)
 		if err != nil {
 			cancel()
 			return ctx, q, err
 		}
-		s.conn = conn
+		s.conn = fresh
 	}
 	return ctx, q, nil
 }
