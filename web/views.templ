@@ -105,6 +105,17 @@ templ Index(services []string, current string, readOnly bool, j jobView, err err
 					</div>
 				</form>
 			</dialog>
+			<dialog id="params" class="modal">
+				<form method="dialog" class="modal-box">
+					<h3 class="text-base font-medium">Parameters</h3>
+					<div id="params-fields"></div>
+					<p class="text-xs text-base-content/50 mt-3">Values go in as quoted text, which Postgres converts to the type it needs. NULL means null.</p>
+					<div class="modal-action">
+						<button type="button" class="btn btn-soft btn-sm" onclick="document.querySelector('#params').close()">Cancel</button>
+						<button class="btn btn-primary btn-sm" value="yes">Continue</button>
+					</div>
+				</form>
+			</dialog>
 			<dialog id="backups" class="modal">
 				<div id="backups-body" class="modal-box max-w-4xl"></div>
 				<form method="dialog" class="modal-backdrop"><button aria-label="Close">close</button></form>
@@ -517,7 +528,9 @@ func definitionURL(n catalog.Node) string {
 }
 
 templ Results(p session.Page, tab string) {
-	if len(p.Columns) == 0 {
+	if p.Plan != "" {
+		@planView(p)
+	} else if len(p.Columns) == 0 {
 		@summary(p)
 	} else if isPlan(p) {
 		<pre class="p-2 font-mono text-xs">
@@ -542,6 +555,61 @@ templ Results(p session.Page, tab string) {
 	}
 }
 
+// planView shows what Explain returned as a tree, or as it came if that fails.
+templ planView(p session.Page) {
+	if tree, err := parsePlan(p.Plan); err != nil {
+		<pre class="p-2 font-mono text-xs">{ p.Plan }</pre>
+	} else {
+		<div class="p-2 text-sm">
+			<ul>
+				@planStep(tree.Root)
+			</ul>
+		</div>
+		<div class="flex items-center gap-3 pr-2">
+			<div class="flex-1 min-w-0">
+				@summary(p)
+			</div>
+			if tree.Timing != "" {
+				<span class="text-xs text-base-content/60">{ tree.Timing }</span>
+			}
+			<button type="button" class="btn btn-ghost btn-xs" data-plan={ p.Plan } onclick="copyPlan(this)">Copy JSON</button>
+		</div>
+	}
+}
+
+templ planStep(n *planNode) {
+	<li>
+		<details>
+			<summary class="flex flex-wrap items-center gap-x-3 gap-y-0.5 rounded px-1 py-0.5 cursor-pointer hover:bg-base-200">
+				<span class="w-20 h-2 shrink-0 overflow-hidden rounded-full bg-base-300" title={ fmt.Sprintf("%.0f%% of the plan", n.Share*100) }>
+					<span class={ "block h-full", templ.KV("bg-warning", n.Slowest), templ.KV("bg-primary", !n.Slowest) } style={ fmt.Sprintf("width:%.1f%%", n.Share*100) }></span>
+				</span>
+				<span class={ "font-medium", templ.KV("text-warning", n.SeqScan) }>{ n.Type }</span>
+				if n.Target != "" {
+					<span class="font-mono text-xs">{ n.Target }</span>
+				}
+				<span class="text-xs text-base-content/60">{ n.Stats }</span>
+				if n.Estimate != "" {
+					<span class="badge badge-warning badge-xs">{ n.Estimate }</span>
+				}
+			</summary>
+			<dl class="grid grid-cols-[auto_1fr] gap-x-3 ml-24 my-1 text-xs">
+				for _, d := range n.Details {
+					<dt class="text-base-content/60">{ d.Name }</dt>
+					<dd class="font-mono whitespace-pre-wrap break-words min-w-0">{ d.Value }</dd>
+				}
+			</dl>
+		</details>
+		if len(n.Children) > 0 {
+			<ul class="ml-3 pl-3 border-l border-base-300">
+				for _, child := range n.Children {
+					@planStep(child)
+				}
+			</ul>
+		}
+	</li>
+}
+
 // MoreRows is a page of rows followed by either a sentinel row that loads
 // the next page when it scrolls into view, or a footer once the query is done.
 templ MoreRows(p session.Page, tab string) {
@@ -558,6 +626,18 @@ templ MoreRows(p session.Page, tab string) {
 	}
 	if p.Done {
 		<tr>
+			<td colspan={ fmt.Sprint(p.NumCols) }>
+				@summary(p)
+			</td>
+		</tr>
+	} else if p.Ended {
+		<!-- Comes in after the table, leaving this row as the table's summary. -->
+		<tr
+			hx-get={ fmt.Sprintf("/query/%d/more?tab=%s&next=1", p.QueryID, url.QueryEscape(tab)) }
+			hx-trigger="intersect once"
+			hx-target="closest table"
+			hx-swap="afterend"
+		>
 			<td colspan={ fmt.Sprint(p.NumCols) }>
 				@summary(p)
 			</td>
@@ -583,8 +663,8 @@ templ summary(p session.Page) {
 	</div>
 }
 
-// isPlan reports whether p is an EXPLAIN result, typed or from the Explain
-// button, which reads better as text than as a one-column grid.
+// isPlan reports whether p is an EXPLAIN typed into the editor, which reads
+// better as text than as a one-column grid.
 func isPlan(p session.Page) bool {
 	return p.Done && len(p.Columns) == 1 && p.Columns[0] == "QUERY PLAN"
 }

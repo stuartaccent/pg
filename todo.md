@@ -88,6 +88,12 @@ Built along the way, outside the lists above.
 - [x] Save queries with the same dialog, offering the query the tab came from.
 - [x] Status bar for the connection, the running job and the latest message.
 
+### Results
+
+- [x] Show every statement's result, one after another, rather than only the first.
+- [x] `:name` parameters, asked for before running and remembered.
+- [x] Show Explain and Analyze as a tree, with each step's share of the time and bad row estimates flagged.
+
 ### Tree
 
 - [x] Browser tree of the connected database, loading each level on expand, on its own connection.

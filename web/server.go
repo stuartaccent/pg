@@ -361,6 +361,10 @@ func (s *Server) more(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
+	if r.FormValue("next") != "" {
+		render(w, r, Results(p, tab))
+		return
+	}
 	render(w, r, MoreRows(p, tab))
 }
 
