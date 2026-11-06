@@ -256,20 +256,34 @@ function closeRestore() {
 	document.querySelector("#backups").close();
 }
 
+function forget(sql) {
+	localStorage.setItem("history", JSON.stringify(loadHistory().filter((entry) => entry !== sql)));
+	renderHistory();
+	document.querySelector("#history-search").focus();
+}
+
 function renderHistory() {
 	const term = document.querySelector("#history-search").value.toLowerCase();
 	const list = document.querySelector("#history-list");
 	list.replaceChildren(...loadHistory().filter((sql) => sql.toLowerCase().includes(term)).map((sql) => {
 		const item = document.createElement("li");
+		item.className = "flex items-center gap-2";
 		const button = document.createElement("button");
 		button.type = "button";
-		button.className = "font-mono text-xs block truncate";
+		button.className = "font-mono text-xs text-left truncate flex-1 min-w-0 py-1 cursor-pointer hover:underline";
 		button.textContent = button.title = sql;
 		button.onclick = () => {
 			document.querySelector("#history").close();
 			openSQL(sql);
 		};
-		item.append(button);
+		const remove = document.createElement("button");
+		remove.type = "button";
+		remove.className = "btn btn-ghost btn-xs shrink-0";
+		remove.textContent = "✕";
+		remove.title = "Remove from history";
+		remove.setAttribute("aria-label", "Remove from history");
+		remove.onclick = () => forget(sql);
+		item.append(button, remove);
 		return item;
 	}));
 }

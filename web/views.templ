@@ -142,9 +142,9 @@ templ Index(services []string, current string, readOnly bool, j jobView, err err
 				<form method="dialog" class="modal-backdrop"><button aria-label="Close">close</button></form>
 			</dialog>
 			<dialog id="history" class="modal">
-				<div class="modal-box max-w-3xl">
+				<div class="modal-box max-w-4xl">
 					<input id="history-search" type="search" class="input input-sm w-full" placeholder="Search history…" aria-label="Search history" oninput="renderHistory()"/>
-					<ul id="history-list" class="menu menu-sm w-full mt-2 max-h-[60vh] overflow-auto flex-nowrap"></ul>
+					<ul id="history-list" class="mt-2 max-h-[60vh] overflow-auto"></ul>
 				</div>
 				<form method="dialog" class="modal-backdrop"><button aria-label="Close">close</button></form>
 			</dialog>
