@@ -170,3 +170,24 @@ func TestPasswordRejected(t *testing.T) {
 		}
 	}
 }
+
+func TestSettingsDatabase(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "services")
+	t.Setenv("PGSERVICEFILE", file)
+	t.Setenv("PGDATABASE", "")
+	text := "[named]\nhost=localhost\nuser=me\ndbname=mine\n" +
+		"[missing]\nhost=localhost\nuser=me\n" +
+		"[blank]\nhost=localhost\nuser=me\ndbname=\n"
+	if err := os.WriteFile(file, []byte(text), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for service, want := range map[string]string{"named": "mine", "missing": "me", "blank": "me"} {
+		s, err := SettingsFor(ServiceDSN(service))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if s.Database != want {
+			t.Errorf("%s: database = %q, want %q", service, s.Database, want)
+		}
+	}
+}

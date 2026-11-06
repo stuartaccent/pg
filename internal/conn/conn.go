@@ -5,6 +5,7 @@
 package conn
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -146,13 +147,14 @@ type Settings struct {
 	Database string
 }
 
-// SettingsFor resolves dsn, including any service and password files.
+// SettingsFor resolves dsn, including any service and password files. With no
+// database named, the server uses the one named after the user, so that's it.
 func SettingsFor(dsn string) (Settings, error) {
 	cfg, err := pgconn.ParseConfig(dsn)
 	if err != nil {
 		return Settings{}, err
 	}
-	return Settings{Host: cfg.Host, Port: cfg.Port, User: cfg.User, Password: cfg.Password, Database: cfg.Database}, nil
+	return Settings{Host: cfg.Host, Port: cfg.Port, User: cfg.User, Password: cfg.Password, Database: cmp.Or(cfg.Database, cfg.User)}, nil
 }
 
 // ReadOnly reports whether c defaults to read-only transactions, which a
