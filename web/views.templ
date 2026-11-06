@@ -362,7 +362,7 @@ templ treeLabel(n catalog.Node) {
 			<span class="shrink-0 max-w-full truncate" title={ n.Label }>{ n.Label }</span>
 		}
 		if n.Detail != "" {
-			<span class="truncate shrink-[1000] text-base-content/50" title={ n.Detail }>{ n.Detail }</span>
+			<span class="truncate shrink-1000 text-base-content/50" title={ n.Detail }>{ n.Detail }</span>
 		}
 		if n.SQL != "" && n.Def != "" {
 			<button type="button" class="cursor-pointer shrink-0 ml-auto text-base-content/60 opacity-0 hover:underline group-hover:opacity-100 focus:opacity-100" aria-label={ "Show the definition of " + n.Label } data-url={ definitionURL(n) } onclick="useDefinition(event, this)">DDL</button>
