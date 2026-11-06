@@ -112,7 +112,7 @@ templ Index(services []string, current string, readOnly bool, j jobView, err err
 			<dialog id="save-query" class="modal">
 				<form class="modal-box" hx-post="/queries" hx-target="#save-status">
 					<h3 class="text-base font-medium">Save query</h3>
-					<label for="save-name" class="block text-xs text-base-content/50 mt-4 mb-1">Name</label>
+					<label for="save-name" class="block text-xs text-base-content/50 mt-4 mb-1">Name, with folder/ in front to file it in one</label>
 					<input id="save-name" name="name" class="input input-sm w-full focus:outline-1 focus:outline-offset-0" required maxlength="200" autocomplete="off" spellcheck="false"/>
 					<input id="save-text" type="hidden" name="text"/>
 					<div id="save-status" class="mt-2"></div>

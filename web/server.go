@@ -80,7 +80,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /queries", s.queries)
 	mux.HandleFunc("POST /queries", s.saveQuery)
 	mux.HandleFunc("POST /queries/open", s.openQueries)
-	mux.HandleFunc("GET /queries/{name}", s.readQuery)
+	mux.HandleFunc("GET /queries/{name...}", s.readQuery)
 	mux.HandleFunc("GET /activity", s.activity)
 	mux.HandleFunc("POST /activity/{pid}/{action}", s.stopBackend)
 	return noStore(mux)
