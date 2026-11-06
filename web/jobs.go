@@ -14,6 +14,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
+
 	"pg/internal/conn"
 	"pg/internal/dockerpg"
 )
@@ -212,17 +214,24 @@ func saveBackup(ctx context.Context, settings conn.Settings, image string, progr
 	return "Saved " + filepath.Base(dest), nil
 }
 
+// backupPath returns the path of a backup named by the page, which has to be
+// one in the backup folder.
+func backupPath(name string) (string, error) {
+	dir, err := backupDir()
+	if err != nil {
+		return "", err
+	}
+	if name != filepath.Base(name) || !strings.HasSuffix(name, ".backup") {
+		return "", errors.New("not a backup: " + name)
+	}
+	path := filepath.Join(dir, name)
+	_, err = os.Stat(path)
+	return path, err
+}
+
 func (s *Server) newSandbox(w http.ResponseWriter, r *http.Request) {
 	name := r.FormValue("file")
-	dir, err := backupDir()
-	if err == nil && (name != filepath.Base(name) || !strings.HasSuffix(name, ".backup")) {
-		err = errors.New("not a backup: " + name)
-	}
-	var path string
-	if err == nil {
-		path = filepath.Join(dir, name)
-		_, err = os.Stat(path)
-	}
+	path, err := backupPath(name)
 	if err != nil {
 		render(w, r, JobStatus(jobView{Label: "Sandbox", Err: err}))
 		return
@@ -237,6 +246,66 @@ func (s *Server) newSandbox(w http.ResponseWriter, r *http.Request) {
 		}
 		return sb.Name + " is ready: pick it from the service list.", nil
 	})
+}
+
+func (s *Server) verifyBackup(w http.ResponseWriter, r *http.Request) {
+	name := r.FormValue("file")
+	path, err := backupPath(name)
+	if err != nil {
+		render(w, r, JobStatus(jobView{Label: "Verify", Err: err}))
+		return
+	}
+	s.mu.Lock()
+	connect, database := s.connect, s.settings.Database
+	s.mu.Unlock()
+	if !dockerpg.SameDatabase(name, database) {
+		connect = nil
+	}
+	s.startAndRender(w, r, "Verifying "+name, func(ctx context.Context, progress func(string)) (string, error) {
+		report, err := dockerpg.Verify(ctx, dockerpg.ImageForBackup(name), path, progress)
+		if err != nil {
+			return "", err
+		}
+		if problem := report.Problem(); problem != "" {
+			return "", errors.New(problem)
+		}
+		summary := fmt.Sprintf("Verified %s: %d tables, %d rows.", name, len(report.Counts), report.Rows())
+		if connect == nil {
+			return summary, nil
+		}
+		progress("Comparing with the live database")
+		live, err := liveCounts(ctx, connect)
+		if err != nil {
+			return summary + " Couldn't compare with the live database: " + err.Error(), nil
+		}
+		return summary + " " + describeDifferences(dockerpg.Differences(report.Counts, live)), nil
+	})
+}
+
+// liveCounts counts a live database's rows, in a transaction that can't write.
+func liveCounts(ctx context.Context, connect func(context.Context) (*pgconn.PgConn, error)) (map[string]int64, error) {
+	c, err := connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer c.Close(context.WithoutCancel(ctx))
+	if _, err := c.Exec(ctx, "begin read only").ReadAll(); err != nil {
+		return nil, err
+	}
+	return dockerpg.TableCounts(ctx, c)
+}
+
+// describeDifferences sums them up. They aren't a fault: a live database is
+// meant to move on from its backups.
+func describeDifferences(found []string) string {
+	const shown = 5
+	switch {
+	case len(found) == 0:
+		return "Matches the live database exactly."
+	case len(found) > shown:
+		return fmt.Sprintf("%d tables differ from the live database, such as %s.", len(found), strings.Join(found[:shown], "; "))
+	}
+	return fmt.Sprintf("%d differ from the live database: %s.", len(found), strings.Join(found, "; "))
 }
 
 func (s *Server) startAndRender(w http.ResponseWriter, r *http.Request, label string, work func(context.Context, func(string)) (string, error)) {

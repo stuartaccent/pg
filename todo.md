@@ -111,7 +111,7 @@ Built along the way, outside the lists above.
 
 Talked about but not built.
 
-- [ ] Verify a backup: restore it into a throwaway container and compare table and row counts.
+- [x] Verify a backup: restore it into a throwaway container and compare table and row counts.
 - [ ] Restore a backup, into a new database by default. Overwriting should mean typing the database's name, and be refused on read-only services.
 - [ ] Delete backups from the Backups dialog.
 - [ ] A proper `.app` bundle, so the Dock label says `pg` and the generic tile doesn't flash at launch.

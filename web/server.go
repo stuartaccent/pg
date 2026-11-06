@@ -58,6 +58,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /backups", s.backups)
 	mux.HandleFunc("POST /backups/open", s.openBackups)
 	mux.HandleFunc("POST /backup", s.backup)
+	mux.HandleFunc("POST /backups/verify", s.verifyBackup)
 	mux.HandleFunc("POST /sandboxes", s.newSandbox)
 	mux.HandleFunc("POST /sandboxes/{name}/remove", s.removeSandbox)
 	mux.HandleFunc("GET /job", s.jobStatus)

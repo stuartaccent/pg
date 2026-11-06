@@ -345,3 +345,30 @@ func TestOpenBackupsFolder(t *testing.T) {
 		t.Errorf("failure not shown: %q", body)
 	}
 }
+
+func TestVerifyOnlyTakesAFileInTheBackupFolder(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	for _, file := range []string{"../../etc/passwd", "missing.backup", "notes.txt", ""} {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/backups/verify", strings.NewReader(url.Values{"file": {file}}.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		s := New()
+		s.Handler().ServeHTTP(w, req)
+		if s.job != nil {
+			t.Errorf("%q started a job", file)
+		}
+	}
+}
+
+func TestDescribeDifferences(t *testing.T) {
+	if got := describeDifferences(nil); got != "Matches the live database exactly." {
+		t.Errorf("none: %q", got)
+	}
+	if got := describeDifferences([]string{"a", "b"}); got != "2 differ from the live database: a; b." {
+		t.Errorf("few: %q", got)
+	}
+	many := describeDifferences([]string{"a", "b", "c", "d", "e", "f", "g"})
+	if !strings.HasPrefix(many, "7 tables differ") || strings.Contains(many, "f") && strings.Contains(many, "; f") {
+		t.Errorf("many: %q", many)
+	}
+}

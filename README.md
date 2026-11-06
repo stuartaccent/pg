@@ -62,6 +62,7 @@ PGIDE_TEST_SERVICE=local go test -race ./...
 - Config opens the service and password files in your text editor, creating them if need be. pg never reads them itself beyond connecting, and new services appear when you come back to it.
 - Backups needs Docker, and runs `pg_dump` from the image matching the server, so nothing has to be installed. Files go in `~/pg-backups`; anything ending `.backup` in there is listed, so older ones can be copied in.
 - Open in sandbox restores a backup into a throwaway container, which then appears in the service list. It's a copy of real data, bound to `127.0.0.1`, and stays in Docker until you remove it in Backups.
+- Verify proves a backup restores: every table it lists has to arrive, in a throwaway container that's then removed. Connected to the same database, it also compares row counts, which runs `count(*)` on every table there.
 - Click a result cell to read all of it, format JSON and copy it.
 - Export CSV saves to `~/Downloads`, in a read-only transaction: it runs the query again, so one that writes is refused.
 - Tabs' SQL, history, the last service and pane sizes are kept in the webview's `localStorage`, so history holds whatever you've run.
