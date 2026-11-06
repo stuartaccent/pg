@@ -335,7 +335,16 @@ function forget(sql) {
 function renderHistory() {
 	const term = document.querySelector("#history-search").value.toLowerCase();
 	const list = document.querySelector("#history-list");
-	list.replaceChildren(...loadHistory().filter((sql) => sql.toLowerCase().includes(term)).map((sql) => {
+	const history = loadHistory();
+	const found = history.filter((sql) => sql.toLowerCase().includes(term));
+	if (found.length === 0) {
+		const empty = document.createElement("li");
+		empty.className = "text-base-content/50 text-sm py-1";
+		empty.textContent = history.length === 0 ? "No history yet." : "No matches.";
+		list.replaceChildren(empty);
+		return;
+	}
+	list.replaceChildren(...found.map((sql) => {
 		const item = document.createElement("li");
 		item.className = "flex items-center gap-2";
 		const button = document.createElement("button");
