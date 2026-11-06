@@ -324,7 +324,7 @@ func TestSaveCSV(t *testing.T) {
 	t.Setenv("HOME", home)
 	connect := func(ctx context.Context) (*pgconn.PgConn, error) { return conn.Open(ctx, conn.ServiceDSN(service)) }
 
-	path, rows, err := saveCSV(context.Background(), connect, "select 1 as a")
+	path, rows, err := saveCSV(context.Background(), connect, "select 1 as a", "")
 	if err != nil || rows != 1 {
 		t.Fatalf("rows = %d, err = %v", rows, err)
 	}
@@ -332,12 +332,72 @@ func TestSaveCSV(t *testing.T) {
 		t.Errorf("file = %q", got)
 	}
 
-	if _, _, err := saveCSV(context.Background(), connect, "select nope"); err == nil {
+	if _, _, err := saveCSV(context.Background(), connect, "select nope", ""); err == nil {
 		t.Fatal("bad sql: want an error")
 	}
 	files, _ := filepath.Glob(filepath.Join(home, "Downloads", "*"))
 	if len(files) != 1 {
 		t.Errorf("failed export left a file behind: %v", files)
+	}
+
+	// A chosen file replaces what's there, but only once the export has worked.
+	chosen := filepath.Join(home, "chosen.csv")
+	if err := os.WriteFile(chosen, []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := saveCSV(context.Background(), connect, "select nope", chosen); err == nil {
+		t.Fatal("bad sql: want an error")
+	}
+	if got, _ := os.ReadFile(chosen); string(got) != "old" {
+		t.Errorf("failed export changed the file: %q", got)
+	}
+	if path, _, err := saveCSV(context.Background(), connect, "select 2 as b", chosen); err != nil || path != chosen {
+		t.Fatalf("path = %q, err = %v", path, err)
+	}
+	if got, _ := os.ReadFile(chosen); string(got) != "b\n2\n" {
+		t.Errorf("file = %q", got)
+	}
+	if left, _ := filepath.Glob(filepath.Join(home, ".pg-export-*")); len(left) != 0 {
+		t.Errorf("left a temp file: %v", left)
+	}
+}
+
+func TestCancellingTheExportDialog(t *testing.T) {
+	s := New()
+	s.connect = func(context.Context) (*pgconn.PgConn, error) {
+		t.Error("cancelling shouldn't connect")
+		return nil, errors.New("no")
+	}
+	s.ChooseExport = func(string) (string, error) { return "", nil }
+	if got := postForm(s, "/export", url.Values{"sql": {"select 1"}}).Code; got != http.StatusNoContent {
+		t.Errorf("status = %d", got)
+	}
+	s.ChooseExport = func(string) (string, error) { return "", errors.New("no dialog") }
+	if body := postForm(s, "/export", url.Values{"sql": {"select 1"}}).Body.String(); !strings.Contains(body, "no dialog") {
+		t.Errorf("failure not shown: %q", body)
+	}
+}
+
+func TestRunningJob(t *testing.T) {
+	s := New()
+	if got := s.RunningJob(); got != "" {
+		t.Errorf("no job = %q", got)
+	}
+	release := make(chan struct{})
+	j, err := s.start("Backup", func(context.Context, func(string)) (jobResult, error) {
+		<-release
+		return jobResult{}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := s.RunningJob(); got != "Backup" {
+		t.Errorf("running = %q", got)
+	}
+	close(release)
+	<-j.finished
+	if got := s.RunningJob(); got != "" {
+		t.Errorf("finished = %q", got)
 	}
 }
 

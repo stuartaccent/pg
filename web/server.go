@@ -34,6 +34,11 @@ var static embed.FS
 // Server holds one query session per tab and the tree's catalog, all for the
 // connected service, plus the backup or sandbox job in progress.
 type Server struct {
+	// ChooseExport asks where to save an export, starting from name, and
+	// returns "" if cancelled. Set it before serving. Without it, as in a
+	// browser, exports go to ~/Downloads.
+	ChooseExport func(name string) (string, error)
+
 	mu       sync.Mutex
 	service  string                                        // guarded by mu
 	readOnly bool                                          // guarded by mu
@@ -368,22 +373,39 @@ func (s *Server) export(w http.ResponseWriter, r *http.Request) {
 		render(w, r, ExportStatus("", 0, errors.New("connect to a service first")))
 		return
 	}
-	path, rows, err := saveCSV(r.Context(), connect, r.FormValue("sql"))
+	var chosen string
+	if s.ChooseExport != nil {
+		var err error
+		if chosen, err = s.ChooseExport("export.csv"); err != nil {
+			render(w, r, ExportStatus("", 0, err))
+			return
+		}
+		if chosen == "" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+	}
+	path, rows, err := saveCSV(r.Context(), connect, r.FormValue("sql"), chosen)
 	render(w, r, ExportStatus(path, rows, err))
 }
 
-// saveCSV writes query's rows to a new file in ~/Downloads, on a connection of
-// its own so the tab's result isn't disturbed. Going straight to a file keeps
-// large results out of memory, and webviews needn't support downloads.
+// saveCSV writes query's rows to path, or a new file in ~/Downloads if that's
+// empty, on a connection of its own so the tab's result isn't disturbed. Going
+// straight to a file keeps large results out of memory, and webviews needn't
+// support downloads. It writes beside path and renames, so a failed export
+// leaves a file being replaced as it was.
 //
 // shortcut: Cancel doesn't reach an export, only leaving the page does. Share
 // the session's cancel if long exports turn out to need stopping.
-func saveCSV(ctx context.Context, connect func(context.Context) (*pgconn.PgConn, error), query string) (string, int64, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", 0, err
+func saveCSV(ctx context.Context, connect func(context.Context) (*pgconn.PgConn, error), query, path string) (string, int64, error) {
+	dir, pattern := filepath.Dir(path), ".pg-export-*.csv"
+	if path == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", 0, err
+		}
+		dir, pattern = filepath.Join(home, "Downloads"), "pg-export-*.csv"
 	}
-	dir := filepath.Join(home, "Downloads")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", 0, err
 	}
@@ -397,7 +419,7 @@ func saveCSV(ctx context.Context, connect func(context.Context) (*pgconn.PgConn,
 		_ = c.Close(closing)
 	}()
 
-	f, err := os.CreateTemp(dir, "pg-export-*.csv")
+	f, err := os.CreateTemp(dir, pattern)
 	if err != nil {
 		return "", 0, err
 	}
@@ -409,7 +431,14 @@ func saveCSV(ctx context.Context, connect func(context.Context) (*pgconn.PgConn,
 		_ = os.Remove(f.Name()) // half an export is worse than none
 		return "", 0, err
 	}
-	return f.Name(), rows, nil
+	if path == "" {
+		return f.Name(), rows, nil
+	}
+	if err := os.Rename(f.Name(), path); err != nil {
+		_ = os.Remove(f.Name())
+		return "", 0, err
+	}
+	return path, rows, nil
 }
 
 func (s *Server) tree(w http.ResponseWriter, r *http.Request) {
