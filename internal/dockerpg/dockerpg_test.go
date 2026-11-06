@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -220,6 +221,152 @@ func TestStoppingASandboxRemovesIt(t *testing.T) {
 		t.Fatal("want an error")
 	}
 	after, _ := Sandboxes(context.Background())
+	if len(after) != len(before) {
+		t.Errorf("sandbox left running: %+v", after)
+	}
+}
+
+func TestCountListedTables(t *testing.T) {
+	list := `;
+; Archive created at 2026-11-05
+;
+215; 1259 16385 TABLE public kept postgres
+216; 1259 16390 TABLE public other postgres
+217; 1259 16395 SEQUENCE public other_id_seq postgres
+3341; 0 16385 TABLE DATA public kept postgres
+3342; 0 16390 TABLE DATA public other postgres
+218; 1259 16399 TABLE public DATA postgres
+3100; 0 0 TABLE ATTACH public parted_low postgres
+`
+	if got := countListedTables(list); got != 3 {
+		t.Errorf("got %d, want 3", got)
+	}
+}
+
+func TestReportProblem(t *testing.T) {
+	counts := map[string]int64{"public.a": 2, "public.b": 3}
+	for _, tt := range []struct {
+		report Report
+		want   string
+	}{
+		{Report{ListedTables: 2, Counts: counts}, ""},
+		{Report{ListedTables: 3, Counts: counts}, "the backup lists 3 tables, but 2 were restored"},
+		{Report{ListedTables: 2, Counts: counts, Ignored: 4}, "the restore skipped 4 errors"},
+	} {
+		if got := tt.report.Problem(); got != tt.want {
+			t.Errorf("%+v: got %q", tt.report, got)
+		}
+	}
+	if got := (Report{Counts: counts}).Rows(); got != 5 {
+		t.Errorf("rows = %d", got)
+	}
+}
+
+func TestDifferences(t *testing.T) {
+	backup := map[string]int64{"public.same": 1, "public.grew": 2, "public.dropped": 3}
+	live := map[string]int64{"public.same": 1, "public.grew": 5, "public.added": 4}
+	want := []string{
+		"public.added: not in the backup",
+		"public.dropped: no longer in the live database",
+		"public.grew: 2 rows in the backup, 5 live",
+	}
+	if got := Differences(backup, live); !slices.Equal(got, want) {
+		t.Errorf("got %q", got)
+	}
+	if got := Differences(live, live); len(got) != 0 {
+		t.Errorf("identical: %q", got)
+	}
+}
+
+func TestSameDatabase(t *testing.T) {
+	name := BackupName("crm/db", "postgres:17", time.Now())
+	if !SameDatabase(name, "crm/db") {
+		t.Error("same database not matched")
+	}
+	for _, other := range []string{"crm", "crm_db2", ""} {
+		if SameDatabase(name, other) {
+			t.Errorf("matched %q", other)
+		}
+	}
+}
+
+func TestVerify(t *testing.T) {
+	_, image := settings(t)
+	ctx := context.Background()
+	quiet := func(string) {}
+	source, cleanup := emptySandbox(t, image)
+	defer cleanup()
+	seed, err := conn.Open(ctx, source.DSN())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer seed.Close(ctx)
+	if _, err := seed.Exec(ctx, `
+		create extension btree_gist;
+		create table kept (id int primary key);
+		insert into kept select generate_series(1, 3);
+		create table "Empty one" (id int);
+		create table parted (id int) partition by range (id);
+		create table parted_low partition of parted for values from (1) to (10);
+		insert into parted values (5)`).ReadAll(); err != nil {
+		t.Fatal(err)
+	}
+	s, err := conn.SettingsFor(source.DSN())
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	dest := filepath.Join(dir, BackupName("sandbox", image, time.Now()))
+	if err := Backup(ctx, s, image, dest, quiet); err != nil {
+		t.Fatal(err)
+	}
+
+	before, _ := Sandboxes(ctx)
+	report, err := Verify(ctx, image, dest, quiet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := report.Problem(); got != "" {
+		t.Errorf("problem: %s (%+v)", got, report)
+	}
+	if report.ListedTables != 4 || report.Rows() != 4 {
+		t.Errorf("report = %+v", report)
+	}
+	if report.Counts["public.kept"] != 3 || report.Counts[`public."Empty one"`] != 0 {
+		t.Errorf("counts = %+v", report.Counts)
+	}
+
+	// Compared with its source, nothing differs until the source changes.
+	live, err := TableCounts(ctx, seed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := Differences(report.Counts, live); len(got) != 0 {
+		t.Errorf("differences = %q", got)
+	}
+	if _, err := seed.Exec(ctx, "insert into kept values (4)").ReadAll(); err != nil {
+		t.Fatal(err)
+	}
+	live, _ = TableCounts(ctx, seed)
+	if got := Differences(report.Counts, live); len(got) != 1 {
+		t.Errorf("after a change: %q", got)
+	}
+
+	// A backup cut short must fail, not pass with what it has.
+	data, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	broken := filepath.Join(dir, "broken.backup")
+	if err := os.WriteFile(broken, data[:len(data)/2], 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cut, err := Verify(ctx, image, broken, quiet)
+	if err == nil && cut.Problem() == "" {
+		t.Errorf("a truncated backup passed: %+v", cut)
+	}
+
+	after, _ := Sandboxes(ctx)
 	if len(after) != len(before) {
 		t.Errorf("sandbox left running: %+v", after)
 	}

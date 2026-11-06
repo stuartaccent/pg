@@ -234,6 +234,7 @@ templ BackupsBody(service, dir string, files []backupFile, sandboxes []dockerpg.
 			<li class="flex items-center gap-2 py-1">
 				<span class="min-w-0 flex-1 truncate font-mono text-xs" title={ f.Name }>{ f.Name }</span>
 				<span class="text-base-content/50 shrink-0 text-xs">{ f.Size }</span>
+				<button type="button" class="btn btn-soft btn-xs shrink-0" hx-post="/backups/verify" hx-vals={ fmt.Sprintf(`{"file":%q}`, f.Name) } hx-target="#job" onclick="document.querySelector('#backups').close()">Verify</button>
 				<button type="button" class="btn btn-soft btn-xs shrink-0" hx-post="/sandboxes" hx-vals={ fmt.Sprintf(`{"file":%q}`, f.Name) } hx-target="#job" onclick="document.querySelector('#backups').close()">Open in sandbox</button>
 			</li>
 		}
