@@ -108,6 +108,13 @@ async function closeTab(id) {
 	saveTabs();
 }
 
+const closeActiveTab = () => closeTab(activeTab);
+
+// Runs a menu command, unless a dialog is open and it would act behind that.
+function fromMenu(action) {
+	if (!document.querySelector("dialog[open]")) action();
+}
+
 async function removeTab(id) {
 	await fetch(`/tabs/${id}`, { method: "DELETE" });
 	views.get(id).destroy();
@@ -438,7 +445,11 @@ document.addEventListener("keydown", (event) => {
 	resize(bar, sizeOf(bar) + step);
 });
 
-Object.assign(window, { selectTab, closeTab, closeAllTabs, useSQL, useDefinition, resetTree, formatSQL, showHistory, showQueries, showSaveQuery, showActivity, activityLive, showBackups, showRestore, closeRestore, showReplace, checkReplace, closeReplace, renderHistory, copyCell });
+Object.assign(window, { fromMenu, newTab, closeActiveTab, selectTab, closeTab, closeAllTabs, useSQL, useDefinition, resetTree, formatSQL, showHistory, showQueries, showSaveQuery, showActivity, activityLive, showBackups, showRestore, closeRestore, showReplace, checkReplace, closeReplace, renderHistory, copyCell });
+
+// Wails holds back the menu's commands until its runtime says the page is ready.
+// This page doesn't load that runtime, so it says so itself.
+window.webkit?.messageHandlers?.external?.postMessage("wails:runtime:ready");
 
 document.addEventListener("click", (event) => {
 	const td = event.target.closest?.(".results tr[data-row] td");

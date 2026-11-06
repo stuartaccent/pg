@@ -79,6 +79,13 @@ Built along the way, outside the lists above.
 - [x] A proper `.app` bundle, built with `scripts/bundle.sh`.
 - [x] Tidy the Backups dialog: lists line up with the title, no row hover, no focus ring on opening.
 
+### Desktop
+
+- [x] A native File menu, with ⌘T, ⌘W and ⌘S.
+- [x] Ask before quitting while a job is running.
+- [x] Minimum window size, and a background matching the theme while loading.
+- [x] Choose where an export goes with a native Save dialog.
+
 ### Tree
 
 - [x] Browser tree of the connected database, loading each level on expand, on its own connection.

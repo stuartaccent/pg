@@ -59,6 +59,17 @@ func (j *job) view() jobView {
 	return jobView{Label: j.label, Line: j.line, Result: j.result, Running: !j.done, Err: j.err}
 }
 
+// RunningJob returns the label of the job in progress, or "" if there isn't one.
+func (s *Server) RunningJob() string {
+	s.mu.Lock()
+	j := s.job
+	s.mu.Unlock()
+	if v := j.view(); v.Running {
+		return v.Label
+	}
+	return ""
+}
+
 func (j *job) progress(line string) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
