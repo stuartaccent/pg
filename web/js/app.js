@@ -395,6 +395,11 @@ document.addEventListener("htmx:afterRequest", (event) => {
 // Runs before htmx sends a query, for the ones worth a second thought.
 document.addEventListener("htmx:confirm", (event) => {
 	const { elt, triggeringEvent } = event.detail;
+	if (elt.dataset?.confirm) {
+		event.preventDefault();
+		ask(elt.dataset.confirm).then((ok) => ok && event.detail.issueRequest(true));
+		return;
+	}
 	if (!elt.matches("form[hx-post='/query']")) return;
 	const mode = triggeringEvent?.submitter?.value;
 	const sql = sqlToRun(elt);

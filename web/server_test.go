@@ -372,3 +372,45 @@ func TestDescribeDifferences(t *testing.T) {
 		t.Errorf("many: %q", many)
 	}
 }
+
+func TestDeleteBackup(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := filepath.Join(home, "pg-backups")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	keep := filepath.Join(home, "outside.backup")
+	for _, path := range []string{filepath.Join(dir, "a.backup"), filepath.Join(dir, "b.backup"), filepath.Join(dir, "notes.txt"), keep} {
+		if err := os.WriteFile(path, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	post := func(file string) string {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/backups/delete", strings.NewReader(url.Values{"file": {file}}.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		New().Handler().ServeHTTP(w, req)
+		return w.Body.String()
+	}
+
+	body := post("a.backup")
+	if _, err := os.Stat(filepath.Join(dir, "a.backup")); !os.IsNotExist(err) {
+		t.Errorf("a.backup still there: %v", err)
+	}
+	if strings.Contains(body, "a.backup") || !strings.Contains(body, "b.backup") {
+		t.Errorf("list not refreshed: %q", body)
+	}
+
+	// Only ever a backup in the folder, whatever the page sends.
+	for _, file := range []string{"../outside.backup", keep, "notes.txt", "", ".", "missing.backup"} {
+		if body := post(file); !strings.Contains(body, "text-error") {
+			t.Errorf("%q: no error shown", file)
+		}
+	}
+	for _, path := range []string{keep, filepath.Join(dir, "notes.txt"), filepath.Join(dir, "b.backup")} {
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("%s was removed: %v", path, err)
+		}
+	}
+}
