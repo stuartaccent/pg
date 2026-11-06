@@ -3,6 +3,7 @@ package web
 import (
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -101,6 +102,19 @@ templ Index(services []string, current string, readOnly bool, j jobView, err err
 				<div id="backups-body" class="modal-box max-w-3xl"></div>
 				<form method="dialog" class="modal-backdrop"><button aria-label="Close">close</button></form>
 			</dialog>
+			<dialog id="restore" class="modal">
+				<form class="modal-box" hx-post="/backups/restore" hx-target="#job" onsubmit="closeRestore()">
+					<h3 class="font-medium">Restore to a new database</h3>
+					<p id="restore-text" class="text-sm mt-2 break-all"></p>
+					<input id="restore-file" type="hidden" name="file"/>
+					<input id="restore-name" name="database" class="input input-sm w-full font-mono mt-3" aria-label="New database name" required maxlength="63" pattern="[A-Za-z_][A-Za-z0-9_]*" title="Letters, numbers and underscores, not starting with a number"/>
+					<p class="text-base-content/60 text-xs mt-2">Existing databases aren't touched: a name that's taken just stops the restore.</p>
+					<div class="modal-action">
+						<button type="button" class="btn btn-soft btn-sm" onclick="document.querySelector('#restore').close()">Cancel</button>
+						<button type="submit" class="btn btn-primary btn-sm">Restore</button>
+					</div>
+				</form>
+			</dialog>
 			<dialog id="cell" class="modal">
 				<div class="modal-box max-w-3xl">
 					<pre id="cell-text" class="font-mono text-xs whitespace-pre-wrap break-all max-h-[60vh] overflow-auto"></pre>
@@ -189,6 +203,9 @@ templ serviceSelect(services []string, current string) {
 		for _, name := range services {
 			<option value={ name } selected?={ name == current }>{ name }</option>
 		}
+		if current != "" && !slices.Contains(services, current) {
+			<option value={ current } selected>{ current }</option>
+		}
 	</select>
 }
 
@@ -205,7 +222,10 @@ templ JobStatus(j jobView) {
 			if j.Err != nil {
 				<span class="truncate text-error" title={ j.Err.Error() }>{ j.Label }: { j.Err.Error() }</span>
 			} else {
-				<span class="truncate text-success" title={ j.Result }>{ j.Result }</span>
+				<span class="truncate text-success" title={ j.Result.Text }>{ j.Result.Text }</span>
+				if j.Result.Connect != "" {
+					<button type="button" class="btn btn-soft btn-xs shrink-0" hx-post="/connect" hx-vals={ fmt.Sprintf(`{"service":%q}`, j.Result.Connect) } hx-target="#status">Connect</button>
+				}
 			}
 			<button type="button" class="btn btn-ghost btn-xs shrink-0" aria-label="Dismiss" onclick="this.parentElement.remove()">✕</button>
 		</span>
@@ -213,7 +233,7 @@ templ JobStatus(j jobView) {
 }
 
 // BackupsBody is the Backups dialog's content.
-templ BackupsBody(service, dir string, files []backupFile, sandboxes []dockerpg.Sandbox, err error) {
+templ BackupsBody(service string, canRestore bool, dir string, files []backupFile, sandboxes []dockerpg.Sandbox, err error) {
 	<div class="flex items-center justify-between gap-2">
 		<h3 class="font-medium">Backups</h3>
 		if service != "" {
@@ -236,6 +256,9 @@ templ BackupsBody(service, dir string, files []backupFile, sandboxes []dockerpg.
 				<span class="text-base-content/50 shrink-0 text-xs">{ f.Size }</span>
 				<button type="button" class="btn btn-soft btn-xs shrink-0" hx-post="/backups/verify" hx-vals={ fmt.Sprintf(`{"file":%q}`, f.Name) } hx-target="#job" onclick="document.querySelector('#backups').close()">Verify</button>
 				<button type="button" class="btn btn-soft btn-xs shrink-0" hx-post="/sandboxes" hx-vals={ fmt.Sprintf(`{"file":%q}`, f.Name) } hx-target="#job" onclick="document.querySelector('#backups').close()">Open in sandbox</button>
+				if canRestore {
+					<button type="button" class="btn btn-soft btn-xs shrink-0" data-file={ f.Name } data-name={ dockerpg.RestoreName(f.Name, time.Now()) } data-service={ service } onclick="showRestore(this)">Restore</button>
+				}
 				<button type="button" class="btn btn-soft btn-error btn-xs shrink-0" hx-post="/backups/delete" hx-vals={ fmt.Sprintf(`{"file":%q}`, f.Name) } hx-target="#backups-body" data-confirm={ "Delete " + f.Name + " for good? It won't go to the Trash." } aria-label={ "Delete " + f.Name }>Delete</button>
 			</li>
 		}

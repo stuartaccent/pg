@@ -252,21 +252,21 @@ func TestBackupNeedsAConnection(t *testing.T) {
 func TestOneJobAtATime(t *testing.T) {
 	s := New()
 	release := make(chan struct{})
-	first, err := s.start("first", func(ctx context.Context, progress func(string)) (string, error) {
+	first, err := s.start("first", func(ctx context.Context, progress func(string)) (jobResult, error) {
 		<-release
-		return "done", nil
+		return jobResult{Text: "done"}, nil
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.start("second", func(context.Context, func(string)) (string, error) { return "", nil }); err == nil {
+	if _, err := s.start("second", func(context.Context, func(string)) (jobResult, error) { return jobResult{}, nil }); err == nil {
 		t.Error("a second job started")
 	}
 	close(release)
 	for first.view().Running {
 		time.Sleep(time.Millisecond)
 	}
-	if v := first.view(); v.Result != "done" || v.Err != nil {
+	if v := first.view(); v.Result.Text != "done" || v.Err != nil {
 		t.Errorf("view = %+v", v)
 	}
 
@@ -281,9 +281,9 @@ func TestOneJobAtATime(t *testing.T) {
 
 func TestStoppedJobSaysSo(t *testing.T) {
 	s := New()
-	j, err := s.start("slow", func(ctx context.Context, progress func(string)) (string, error) {
+	j, err := s.start("slow", func(ctx context.Context, progress func(string)) (jobResult, error) {
 		<-ctx.Done()
-		return "", errors.New("exit status 143")
+		return jobResult{}, errors.New("exit status 143")
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -412,5 +412,78 @@ func TestDeleteBackup(t *testing.T) {
 		if _, err := os.Stat(path); err != nil {
 			t.Errorf("%s was removed: %v", path, err)
 		}
+	}
+}
+
+func TestRestoreRefuses(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := filepath.Join(home, "pg-backups")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "a.backup"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	post := func(s *Server, file, database string) string {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/backups/restore", strings.NewReader(url.Values{"file": {file}, "database": {database}}.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		s.Handler().ServeHTTP(w, req)
+		return w.Body.String()
+	}
+	connected := func(readOnly bool) *Server {
+		s := New()
+		s.service, s.readOnly = "local", readOnly
+		return s
+	}
+	for _, tt := range []struct {
+		name, file, database, want string
+		server                     *Server
+	}{
+		{"not connected", "a.backup", "ok", "connect to a service first", New()},
+		{"read-only", "a.backup", "ok", "local is read-only", connected(true)},
+		{"bad name", "a.backup", `x"; drop database y; --`, "not a usable database name", connected(false)},
+		{"not in the folder", "../a.backup", "ok", "not a backup", connected(false)},
+	} {
+		if body := post(tt.server, tt.file, tt.database); !strings.Contains(body, tt.want) && !strings.Contains(body, strings.ReplaceAll(tt.want, `"`, "&#34;")) {
+			t.Errorf("%s: %q", tt.name, body)
+		}
+		if tt.server.job != nil {
+			t.Errorf("%s: started a job", tt.name)
+		}
+	}
+}
+
+func TestRestoreButtonNeedsAWritableConnection(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir, err := backupDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "a.backup"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s := New()
+	if body := get(t, s, http.MethodGet, "/backups").Body.String(); strings.Contains(body, ">Restore<") {
+		t.Error("not connected: Restore offered")
+	}
+	s.service = "local"
+	if body := get(t, s, http.MethodGet, "/backups").Body.String(); !strings.Contains(body, ">Restore<") {
+		t.Error("connected: Restore missing")
+	}
+	s.readOnly = true
+	if body := get(t, s, http.MethodGet, "/backups").Body.String(); strings.Contains(body, ">Restore<") {
+		t.Error("read-only: Restore offered")
+	}
+}
+
+func TestDropdownKeepsARestoredDatabase(t *testing.T) {
+	var b strings.Builder
+	if err := serviceSelect([]string{"local"}, "local/restored").Render(context.Background(), &b); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(b.String(), `<option value="local/restored" selected>`) {
+		t.Errorf("select = %q", b.String())
 	}
 }

@@ -104,6 +104,7 @@ Built along the way, outside the lists above.
 - [x] Link to open the backups folder in Finder.
 - [x] Verify a backup: restore it into a throwaway container, check every table arrived, and compare row counts.
 - [x] Delete backups from the Backups dialog, for good rather than to the Trash.
+- [x] Restore a backup into a new database, removing it again if anything goes wrong, with a Connect button when done.
 
 ### Fixes
 
@@ -113,5 +114,5 @@ Built along the way, outside the lists above.
 
 Talked about but not built.
 
-- [ ] Restore a backup, into a new database by default. Overwriting should mean typing the database's name, and be refused on read-only services.
+- [ ] Replace a database from a backup: restore into a temporary database, check it, then swap by renaming, keeping the old one to roll back to. Type the name to confirm, keep owners and grants, stop on any skipped error, and refuse read-only services.
 - [ ] A proper `.app` bundle, so the Dock label says `pg` and the generic tile doesn't flash at launch.

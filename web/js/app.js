@@ -222,6 +222,19 @@ async function showBackups() {
 	showUnfocused(document.querySelector("#backups"));
 }
 
+function showRestore(button) {
+	const { file, name, service } = button.dataset;
+	document.querySelector("#restore-text").textContent = `${file} to ${service}, as:`;
+	document.querySelector("#restore-file").value = file;
+	document.querySelector("#restore-name").value = name;
+	document.querySelector("#restore").showModal();
+}
+
+function closeRestore() {
+	document.querySelector("#restore").close();
+	document.querySelector("#backups").close();
+}
+
 function renderHistory() {
 	const term = document.querySelector("#history-search").value.toLowerCase();
 	const list = document.querySelector("#history-list");
@@ -360,7 +373,7 @@ document.addEventListener("keydown", (event) => {
 	resize(bar, sizeOf(bar) + step);
 });
 
-Object.assign(window, { selectTab, closeTab, closeAllTabs, useSQL, useDefinition, resetTree, formatSQL, showHistory, showBackups, renderHistory, copyCell });
+Object.assign(window, { selectTab, closeTab, closeAllTabs, useSQL, useDefinition, resetTree, formatSQL, showHistory, showBackups, showRestore, closeRestore, renderHistory, copyCell });
 
 document.addEventListener("click", (event) => {
 	const td = event.target.closest?.(".results tr[data-row] td");
