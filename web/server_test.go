@@ -654,3 +654,21 @@ func TestExpiredResultSaysSo(t *testing.T) {
 		t.Errorf("rows = %q", b.String())
 	}
 }
+
+// app.js finds the query form and Analyze button by these, so renaming one would
+// silently stop the warnings before a risky query.
+func TestWhatTheWarningsDependOn(t *testing.T) {
+	body := get(t, New(), http.MethodGet, "/").Body.String()
+	for _, want := range []string{`hx-post="/query"`, `value="analyze"`, `id="confirm"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("page lacks %s", want)
+		}
+	}
+	js, err := static.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(js), "form[hx-post='/query']") {
+		t.Error("app.js no longer looks for the query form")
+	}
+}

@@ -1,33 +1,22 @@
+import { sqlTokens } from "./tables.mjs";
+
 // statements splits sql into its top-level statements, with comments, quoted
 // text and anything in parentheses taken out, so only real keywords remain.
 function statements(sql) {
 	const found = [];
-	let current = "";
+	let words = [];
 	let depth = 0;
-	for (let i = 0; i < sql.length; i++) {
-		const rest = sql.slice(i);
-		const dollar = /^\$[A-Za-z_]*\$/.exec(rest);
-		const skipTo = (end, from) => {
-			const at = sql.indexOf(end, from);
-			i = at < 0 ? sql.length : at + end.length - 1;
-		};
-		if (rest.startsWith("--")) skipTo("\n", i);
-		else if (rest.startsWith("/*")) skipTo("*/", i + 2);
-		else if (sql[i] === "'" || sql[i] === '"') skipTo(sql[i], i + 1);
-		else if (dollar) skipTo(dollar[0], i + dollar[0].length);
-		else if (sql[i] === "(") depth++;
-		else if (sql[i] === ")") depth--;
+	for (const [token] of sqlTokens(sql)) {
+		if (/^(?:--|\/\*|['"$])/.test(token)) continue;
+		if (token === "(") depth++;
+		else if (token === ")") depth--;
 		else if (depth > 0) continue;
-		else if (sql[i] === ";") {
-			found.push(current);
-			current = "";
-		} else {
-			current += sql[i];
-			continue;
-		}
-		current += " ";
+		else if (token === ";") {
+			found.push(words.join(" "));
+			words = [];
+		} else words.push(token);
 	}
-	found.push(current);
+	found.push(words.join(" "));
 	return found;
 }
 
@@ -38,4 +27,16 @@ export function writesEveryRow(sql) {
 		const verb = /^\s*(?:with\b.*?\s)?(select|insert|update|delete)\b/is.exec(statement)?.[1].toLowerCase();
 		return (verb === "update" || verb === "delete") && !/\bwhere\b/i.test(statement);
 	});
+}
+
+// warningFor is what to ask before sending sql, if anything. mode is the value
+// of the button pressed: none for Run, "1" for Explain, "analyze" for Analyze.
+export function warningFor(mode, sql) {
+	if (mode === "analyze") {
+		return "Analyze really runs this query to time it. Changes are rolled back, but it takes as long as the query, and anything outside the transaction, such as sequences, stays changed.";
+	}
+	if (!mode && writesEveryRow(sql)) {
+		return "This has an update or delete with no where clause, so it changes every row.";
+	}
+	return "";
 }

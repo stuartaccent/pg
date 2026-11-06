@@ -7,7 +7,7 @@ import { Compartment, Prec } from "@codemirror/state";
 import { keymap, placeholder } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import { formatDialect, postgresql } from "sql-formatter";
-import { writesEveryRow } from "./risky.mjs";
+import { warningFor } from "./risky.mjs";
 import { tablesAt } from "./tables.mjs";
 
 const views = new Map(); // tab id to its editor
@@ -450,14 +450,7 @@ document.addEventListener("htmx:confirm", (event) => {
 		return;
 	}
 	if (!elt.matches("form[hx-post='/query']")) return;
-	const mode = triggeringEvent?.submitter?.value;
-	const sql = sqlToRun(elt);
-	let warning;
-	if (mode === "analyze") {
-		warning = "Analyze really runs this query to time it. Changes are rolled back, but it takes as long as the query, and anything outside the transaction, such as sequences, stays changed.";
-	} else if (!mode && writesEveryRow(sql)) {
-		warning = "This has an update or delete with no where clause, so it changes every row.";
-	}
+	const warning = warningFor(triggeringEvent?.submitter?.value, sqlToRun(elt));
 	if (!warning) return;
 	event.preventDefault();
 	ask(warning).then((ok) => ok && event.detail.issueRequest(true));

@@ -1,5 +1,8 @@
 const tokenPattern = /--[^\n]*|\/\*[\s\S]*?\*\/|'(?:[^']|'')*'|\$(\w*)\$[\s\S]*?\$\1\$|"(?:[^"]|"")*"|[A-Za-z_][\w$]*|[^\s]/g;
 
+// sqlTokens splits sql into words, quoted text, comments and punctuation.
+export const sqlTokens = (sql) => sql.matchAll(tokenPattern);
+
 // Words that can follow a table name, so aren't its alias.
 const afterTable = new Set("where group having order union intersect except limit offset fetch for join inner left right full cross natural on using window set returning tablesample values".split(" "));
 
@@ -11,7 +14,7 @@ const unquote = (token) => (token[0] === '"' ? token.slice(1, -1).replaceAll('""
 // tokensAt returns the tokens of the statement around pos, without comments.
 function tokensAt(sql, pos) {
 	let tokens = [];
-	for (const match of sql.matchAll(tokenPattern)) {
+	for (const match of sqlTokens(sql)) {
 		const token = match[0];
 		if (token === ";") {
 			if (match.index >= pos) break;
