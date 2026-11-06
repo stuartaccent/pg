@@ -222,7 +222,10 @@ templ tabPanel(id string) {
 			<button type="submit" form={ "editor-" + id } name="explain" value="analyze" class="btn btn-soft btn-sm">Analyze</button>
 			<button type="button" class="btn btn-soft btn-sm" hx-post="/cancel" hx-vals={ fmt.Sprintf(`{"tab":%q}`, id) } hx-swap="none">Cancel</button>
 			<button type="button" class="btn btn-ghost btn-sm" onclick="formatSQL()">Format</button>
-			<button type="button" class="btn btn-ghost btn-sm" hx-post="/export" hx-include={ "#editor-" + id } hx-target={ "#notice-" + id } hx-indicator={ "#running-" + id }>Export CSV</button>
+			<!-- Two steps, as the Save dialog can stay open a while and that isn't
+			     running anything: Running… only belongs to the second. -->
+			<button id={ "export-" + id } type="button" class="btn btn-ghost btn-sm" hx-post="/export/choose" hx-vals={ fmt.Sprintf(`{"tab":%q}`, id) } hx-target={ "#notice-" + id }>Export CSV</button>
+			<span class="hidden" hx-post="/export" hx-trigger={ "export-ready from:#export-" + id } hx-include={ "#editor-" + id } hx-target={ "#notice-" + id } hx-indicator={ "#running-" + id }></span>
 			<button type="button" class="btn btn-ghost btn-sm" onclick="showHistory()">History</button>
 			<button type="button" class="btn btn-ghost btn-sm" onclick="showQueries()">Queries</button>
 			<button type="button" class="btn btn-ghost btn-sm" onclick="showSaveQuery()">Save</button>
