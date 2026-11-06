@@ -230,6 +230,27 @@ function showRestore(button) {
 	document.querySelector("#restore").showModal();
 }
 
+function showReplace(button) {
+	const { file, database, other } = button.dataset;
+	document.querySelector("#replace-database").textContent = database;
+	document.querySelector("#replace-file").textContent = file;
+	document.querySelector("#replace-file-value").value = file;
+	document.querySelector("#replace-other").hidden = other !== "true";
+	document.querySelector("#replace-confirm").value = "";
+	checkReplace();
+	document.querySelector("#replace").showModal();
+}
+
+function checkReplace() {
+	const typed = document.querySelector("#replace-confirm").value;
+	document.querySelector("#replace-submit").disabled = typed !== document.querySelector("#replace-database").textContent;
+}
+
+function closeReplace() {
+	document.querySelector("#replace").close();
+	document.querySelector("#backups").close();
+}
+
 function closeRestore() {
 	document.querySelector("#restore").close();
 	document.querySelector("#backups").close();
@@ -373,7 +394,7 @@ document.addEventListener("keydown", (event) => {
 	resize(bar, sizeOf(bar) + step);
 });
 
-Object.assign(window, { selectTab, closeTab, closeAllTabs, useSQL, useDefinition, resetTree, formatSQL, showHistory, showBackups, showRestore, closeRestore, renderHistory, copyCell });
+Object.assign(window, { selectTab, closeTab, closeAllTabs, useSQL, useDefinition, resetTree, formatSQL, showHistory, showBackups, showRestore, closeRestore, showReplace, checkReplace, closeReplace, renderHistory, copyCell });
 
 document.addEventListener("click", (event) => {
 	const td = event.target.closest?.(".results tr[data-row] td");

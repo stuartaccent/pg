@@ -21,6 +21,7 @@ type Report struct {
 	ListedTables int              // tables in the backup's table of contents
 	Counts       map[string]int64 // rows in each table that was restored
 	Ignored      int              // errors the restore skipped over
+	FirstError   string           // the first of them, if known
 }
 
 // Rows returns the total rows restored.
@@ -37,6 +38,8 @@ func (r Report) Problem() string {
 	switch {
 	case len(r.Counts) != r.ListedTables:
 		return fmt.Sprintf("the backup lists %d tables, but %d were restored", r.ListedTables, len(r.Counts))
+	case r.Ignored > 0 && r.FirstError != "":
+		return fmt.Sprintf("the restore skipped %d errors, the first being: %s", r.Ignored, r.FirstError)
 	case r.Ignored > 0:
 		return fmt.Sprintf("the restore skipped %d errors", r.Ignored)
 	}
