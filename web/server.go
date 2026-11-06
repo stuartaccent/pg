@@ -170,11 +170,15 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) connectService(w http.ResponseWriter, r *http.Request) {
-	// service/database reaches another database on a service's server, for
-	// connecting to one that's just been restored.
 	service := r.FormValue("service")
-	base, database, _ := strings.Cut(service, "/")
 	services, sandboxes, err := serviceList(r.Context())
+	// service/database reaches another database on a service's server, for
+	// connecting to one that's just been restored. A service can have a slash in
+	// its own name, so that comes first.
+	base, database := service, ""
+	if !slices.Contains(services, service) {
+		base, database, _ = strings.Cut(service, "/")
+	}
 	if err == nil && !slices.Contains(services, base) {
 		err = errors.New("unknown service " + strconv.Quote(base))
 	}

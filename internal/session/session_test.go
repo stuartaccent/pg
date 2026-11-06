@@ -21,7 +21,7 @@ func newTestSession(t *testing.T) *Session {
 	if service == "" {
 		t.Skip("PGIDE_TEST_SERVICE not set")
 	}
-	connect := func(ctx context.Context) (*pgconn.PgConn, error) { return conn.Connect(ctx, service) }
+	connect := func(ctx context.Context) (*pgconn.PgConn, error) { return conn.Open(ctx, conn.ServiceDSN(service)) }
 	c, err := connect(context.Background())
 	if err != nil {
 		t.Fatal(err)

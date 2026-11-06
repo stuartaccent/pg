@@ -115,11 +115,6 @@ func WithDatabase(dsn, database string) string {
 	return dsn + " dbname=" + quote(database)
 }
 
-// Connect opens a connection to the named service.
-func Connect(ctx context.Context, service string) (*pgconn.PgConn, error) {
-	return Open(ctx, ServiceDSN(service))
-}
-
 // Open opens a connection.
 //
 // Cancelling a context passed to a query on the returned connection sends a
