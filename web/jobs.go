@@ -16,8 +16,10 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"pg/internal/catalog"
 	"pg/internal/conn"
 	"pg/internal/dockerpg"
+	"pg/internal/session"
 )
 
 // job is a slow piece of work running in the background.
@@ -37,6 +39,7 @@ type job struct {
 type jobResult struct {
 	Text    string
 	Connect string // a service to offer connecting to, if any
+	Reload  bool   // whether what the page shows of the database is out of date
 }
 
 // jobView is a job as of now, for rendering.
@@ -96,7 +99,11 @@ func (s *Server) jobStatus(w http.ResponseWriter, r *http.Request) {
 		j.mu.Lock()
 		if !j.told {
 			j.told = true
-			w.Header().Set("HX-Trigger", "services-changed") // a sandbox may have appeared
+			trigger := "services-changed" // a sandbox may have appeared
+			if v.Result.Reload {
+				trigger += ", connected" // reloads the tree
+			}
+			w.Header().Set("HX-Trigger", trigger)
 		}
 		j.mu.Unlock()
 	}
@@ -162,15 +169,18 @@ func humanSize(n int64) string {
 
 func (s *Server) renderBackups(w http.ResponseWriter, r *http.Request, err error) {
 	s.mu.Lock()
-	service, canRestore := s.service, s.service != "" && !s.readOnly
+	service, canRestore, database := s.service, s.service != "" && !s.readOnly, s.settings.Database
 	s.mu.Unlock()
+	if dockerpg.CanReplace(database) != "" {
+		database = "" // nothing to offer replacing
+	}
 	dir, derr := backupDir()
 	var files []backupFile
 	if derr == nil {
 		files, derr = listBackups(dir)
 	}
 	_, sandboxes, _ := serviceList(r.Context())
-	render(w, r, BackupsBody(service, canRestore, dir, files, sandboxes, cmp.Or(err, derr)))
+	render(w, r, BackupsBody(service, database, canRestore, dir, files, sandboxes, cmp.Or(err, derr)))
 }
 
 func (s *Server) backups(w http.ResponseWriter, r *http.Request) {
@@ -334,6 +344,59 @@ func (s *Server) restoreBackup(w http.ResponseWriter, r *http.Request) {
 		}
 		return jobResult{Text: text, Connect: base + "/" + database}, nil
 	})
+}
+
+func (s *Server) replaceBackup(w http.ResponseWriter, r *http.Request) {
+	name := r.FormValue("file")
+	path, err := backupPath(name)
+	s.mu.Lock()
+	service, readOnly, database := s.service, s.readOnly, s.settings.Database
+	target := dockerpg.Target{DSN: s.dsn, Settings: s.settings, Image: s.image}
+	s.mu.Unlock()
+	switch {
+	case err != nil:
+	case service == "":
+		err = errors.New("connect to a service first")
+	case readOnly:
+		err = errors.New(service + " is read-only")
+	case dockerpg.CanReplace(database) != "":
+		err = errors.New(dockerpg.CanReplace(database))
+	case r.FormValue("confirm") != database:
+		err = errors.New("the name typed doesn't match " + database)
+	}
+	if err != nil {
+		render(w, r, JobStatus(jobView{Label: "Replace", Err: err}))
+		return
+	}
+	s.startAndRender(w, r, "Replacing "+database, func(ctx context.Context, progress func(string)) (jobResult, error) {
+		report, old, err := dockerpg.Replace(ctx, target, path, database, time.Now(), progress)
+		if err != nil {
+			return jobResult{}, err
+		}
+		s.resetConnections(service)
+		return jobResult{
+			Text:   fmt.Sprintf("Replaced %s: %d tables, %d rows. The previous one is now %s, until you drop it.", database, len(report.Counts), report.Rows(), old),
+			Reload: true,
+		}, nil
+	})
+}
+
+// resetConnections swaps the sessions and catalog for fresh ones, if still on
+// service. A replace ends their connections, which they'd otherwise only
+// discover by failing the next thing they're asked to do.
+func (s *Server) resetConnections(service string) {
+	s.mu.Lock()
+	if s.service != service {
+		s.mu.Unlock()
+		return
+	}
+	sessions, cat := s.sessions, s.cat
+	s.sessions, s.cat = map[string]*session.Session{}, catalog.New(s.connect)
+	s.mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	closeSessions(ctx, sessions)
+	_ = cat.Close(ctx)
 }
 
 // liveCounts counts a live database's rows, in a transaction that can't write.

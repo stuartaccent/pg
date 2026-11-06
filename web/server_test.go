@@ -487,3 +487,67 @@ func TestDropdownKeepsARestoredDatabase(t *testing.T) {
 		t.Errorf("select = %q", b.String())
 	}
 }
+
+func TestReplaceRefuses(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := filepath.Join(home, "pg-backups")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "a.backup"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	connected := func(database string, readOnly bool) *Server {
+		s := New()
+		s.service, s.readOnly, s.settings.Database = "local", readOnly, database
+		return s
+	}
+	for _, tt := range []struct {
+		name, file, confirm, want string
+		server                    *Server
+	}{
+		{"not connected", "a.backup", "", "connect to a service first", New()},
+		{"read-only", "a.backup", "live", "local is read-only", connected("live", true)},
+		{"wrong name typed", "a.backup", "lvie", "doesn&#39;t match", connected("live", false)},
+		{"nothing typed", "a.backup", "", "doesn&#39;t match", connected("live", false)},
+		{"maintenance database", "a.backup", "postgres", "can&#39;t replace postgres", connected("postgres", false)},
+		{"template", "a.backup", "template1", "can&#39;t replace template1", connected("template1", false)},
+		{"not in the folder", "../a.backup", "live", "not a backup", connected("live", false)},
+	} {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/backups/replace", strings.NewReader(url.Values{"file": {tt.file}, "confirm": {tt.confirm}}.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		tt.server.Handler().ServeHTTP(w, req)
+		if body := w.Body.String(); !strings.Contains(body, tt.want) {
+			t.Errorf("%s: %q", tt.name, body)
+		}
+		if tt.server.job != nil {
+			t.Errorf("%s: started a job", tt.name)
+		}
+	}
+}
+
+func TestReplaceButton(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir, err := backupDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "a.backup"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s := New()
+	s.service, s.settings.Database = "local", "live"
+	if body := get(t, s, http.MethodGet, "/backups").Body.String(); !strings.Contains(body, ">Replace<") {
+		t.Error("Replace missing")
+	}
+	s.settings.Database = "postgres"
+	if body := get(t, s, http.MethodGet, "/backups").Body.String(); strings.Contains(body, ">Replace<") {
+		t.Error("offered replacing postgres")
+	}
+	s.settings.Database, s.readOnly = "live", true
+	if body := get(t, s, http.MethodGet, "/backups").Body.String(); strings.Contains(body, ">Replace<") {
+		t.Error("offered replacing on a read-only service")
+	}
+}

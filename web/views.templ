@@ -99,7 +99,7 @@ templ Index(services []string, current string, readOnly bool, j jobView, err err
 				</form>
 			</dialog>
 			<dialog id="backups" class="modal">
-				<div id="backups-body" class="modal-box max-w-3xl"></div>
+				<div id="backups-body" class="modal-box max-w-4xl"></div>
 				<form method="dialog" class="modal-backdrop"><button aria-label="Close">close</button></form>
 			</dialog>
 			<dialog id="restore" class="modal">
@@ -112,6 +112,21 @@ templ Index(services []string, current string, readOnly bool, j jobView, err err
 					<div class="modal-action">
 						<button type="button" class="btn btn-soft btn-sm" onclick="document.querySelector('#restore').close()">Cancel</button>
 						<button type="submit" class="btn btn-primary btn-sm">Restore</button>
+					</div>
+				</form>
+			</dialog>
+			<dialog id="replace" class="modal">
+				<form class="modal-box" hx-post="/backups/replace" hx-target="#job" onsubmit="closeReplace()">
+					<h3 class="font-medium">Replace a database</h3>
+					<p class="text-sm mt-2">This replaces <strong id="replace-database" class="font-mono break-all"></strong> with the backup below, disconnecting anyone using it.</p>
+					<p id="replace-file" class="font-mono text-xs mt-1 break-all"></p>
+					<p id="replace-other" class="text-warning text-sm mt-2" hidden>This backup looks like it's from a different database.</p>
+					<p class="text-base-content/60 text-xs mt-2">The backup is restored and checked first, so a bad one changes nothing. The current database is renamed and kept until you drop it.</p>
+					<input id="replace-file-value" type="hidden" name="file"/>
+					<input id="replace-confirm" name="confirm" class="input input-sm w-full font-mono mt-3" aria-label="Type the database's name to confirm" placeholder="Type the database's name" autocomplete="off" spellcheck="false" oninput="checkReplace()"/>
+					<div class="modal-action">
+						<button type="button" class="btn btn-soft btn-sm" onclick="document.querySelector('#replace').close()">Cancel</button>
+						<button id="replace-submit" type="submit" class="btn btn-warning btn-sm" disabled>Replace</button>
 					</div>
 				</form>
 			</dialog>
@@ -233,7 +248,7 @@ templ JobStatus(j jobView) {
 }
 
 // BackupsBody is the Backups dialog's content.
-templ BackupsBody(service string, canRestore bool, dir string, files []backupFile, sandboxes []dockerpg.Sandbox, err error) {
+templ BackupsBody(service, database string, canRestore bool, dir string, files []backupFile, sandboxes []dockerpg.Sandbox, err error) {
 	<div class="flex items-center justify-between gap-2">
 		<h3 class="font-medium">Backups</h3>
 		if service != "" {
@@ -255,9 +270,12 @@ templ BackupsBody(service string, canRestore bool, dir string, files []backupFil
 				<span class="min-w-0 flex-1 truncate font-mono text-xs" title={ f.Name }>{ f.Name }</span>
 				<span class="text-base-content/50 shrink-0 text-xs">{ f.Size }</span>
 				<button type="button" class="btn btn-soft btn-xs shrink-0" hx-post="/backups/verify" hx-vals={ fmt.Sprintf(`{"file":%q}`, f.Name) } hx-target="#job" onclick="document.querySelector('#backups').close()">Verify</button>
-				<button type="button" class="btn btn-soft btn-xs shrink-0" hx-post="/sandboxes" hx-vals={ fmt.Sprintf(`{"file":%q}`, f.Name) } hx-target="#job" onclick="document.querySelector('#backups').close()">Open in sandbox</button>
+				<button type="button" class="btn btn-soft btn-xs shrink-0" hx-post="/sandboxes" hx-vals={ fmt.Sprintf(`{"file":%q}`, f.Name) } hx-target="#job" onclick="document.querySelector('#backups').close()">Sandbox</button>
 				if canRestore {
 					<button type="button" class="btn btn-soft btn-xs shrink-0" data-file={ f.Name } data-name={ dockerpg.RestoreName(f.Name, time.Now()) } data-service={ service } onclick="showRestore(this)">Restore</button>
+					if database != "" {
+						<button type="button" class="btn btn-soft btn-warning btn-xs shrink-0" data-file={ f.Name } data-database={ database } data-other={ fmt.Sprint(!dockerpg.SameDatabase(f.Name, database)) } onclick="showReplace(this)">Replace</button>
+					}
 				}
 				<button type="button" class="btn btn-soft btn-error btn-xs shrink-0" hx-post="/backups/delete" hx-vals={ fmt.Sprintf(`{"file":%q}`, f.Name) } hx-target="#backups-body" data-confirm={ "Delete " + f.Name + " for good? It won't go to the Trash." } aria-label={ "Delete " + f.Name }>Delete</button>
 			</li>

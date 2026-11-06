@@ -253,6 +253,7 @@ func TestReportProblem(t *testing.T) {
 		{Report{ListedTables: 2, Counts: counts}, ""},
 		{Report{ListedTables: 3, Counts: counts}, "the backup lists 3 tables, but 2 were restored"},
 		{Report{ListedTables: 2, Counts: counts, Ignored: 4}, "the restore skipped 4 errors"},
+		{Report{ListedTables: 2, Counts: counts, Ignored: 4, FirstError: `role "x" does not exist`}, `the restore skipped 4 errors, the first being: role "x" does not exist`},
 	} {
 		if got := tt.report.Problem(); got != tt.want {
 			t.Errorf("%+v: got %q", tt.report, got)
@@ -556,6 +557,193 @@ func TestRestore(t *testing.T) {
 	preciousIntact("at the end")
 	if got := databases(t, server); !slices.Equal(got, []string{"fresh", "postgres", "precious", "sandbox"}) {
 		t.Errorf("databases = %v", got)
+	}
+}
+
+func TestOldName(t *testing.T) {
+	at := time.Date(2026, 11, 6, 9, 30, 15, 0, time.UTC)
+	if got := oldName("shop-db-next", at); got != "shop_db_next_old_20261106_093015" {
+		t.Errorf("got %q", got)
+	}
+	if got := oldName(strings.Repeat("x", 63), at); !ValidDatabase(got) {
+		t.Errorf("long name invalid: %q", got)
+	}
+}
+
+func query(t *testing.T, dsn, sql string) string {
+	t.Helper()
+	ctx := context.Background()
+	c, err := conn.Open(ctx, dsn)
+	if err != nil {
+		t.Fatalf("%s: %v", sql, err)
+	}
+	defer c.Close(ctx)
+	res, err := c.Exec(ctx, sql).ReadAll()
+	if err != nil {
+		t.Fatalf("%s: %v", sql, err)
+	}
+	last := res[len(res)-1]
+	if len(last.Rows) == 0 {
+		return ""
+	}
+	return string(last.Rows[0][0])
+}
+
+func TestReplace(t *testing.T) {
+	_, image := settings(t)
+	ctx := context.Background()
+	quiet := func(string) {}
+	var at = time.Date(2026, 11, 6, 9, 0, 0, 0, time.UTC)
+	tick := func() time.Time { at = at.Add(time.Minute); return at }
+
+	// The backup: a table owned by the app's role, with a grant.
+	source, cleanup := namedSandbox(t, image, "test-replace-source")
+	defer cleanup()
+	query(t, source.DSN(), `
+		create role app; create role reader;
+		create table kept (id int primary key);
+		alter table kept owner to app;
+		grant select on kept to reader;
+		insert into kept select generate_series(1, 3)`)
+	s, err := conn.SettingsFor(source.DSN())
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	dest := filepath.Join(dir, BackupName("sandbox", image, time.Now()))
+	if err := Backup(ctx, s, image, dest, quiet); err != nil {
+		t.Fatal(err)
+	}
+
+	server, cleanupServer := namedSandbox(t, image, "test-replace-target")
+	defer cleanupServer()
+	ts, err := conn.SettingsFor(server.DSN())
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := Target{DSN: server.DSN(), Settings: ts, Image: image}
+	query(t, server.DSN(), "create role app; create role reader")
+	query(t, server.DSN(), "create database live owner app")
+	query(t, server.DSN(), "revoke all on database live from public; grant connect on database live to reader; alter database live set work_mem = '8MB'")
+	live := conn.WithDatabase(server.DSN(), "live")
+	query(t, live, "create table original (id int); insert into original values (42)")
+	stillOriginal := func(when string) {
+		t.Helper()
+		if got := query(t, live, "select id from original"); got != "42" {
+			t.Fatalf("%s: live changed: %q", when, got)
+		}
+		if got := query(t, server.DSN(), "select datallowconn::text from pg_database where datname = 'live'"); got != "true" {
+			t.Fatalf("%s: live left refusing connections", when)
+		}
+	}
+	noTemp := func(when string) {
+		t.Helper()
+		if got := query(t, server.DSN(), "select count(*)::text from pg_database where datname like 'pg_replace_%'"); got != "0" {
+			t.Errorf("%s: %s temp databases left", when, got)
+		}
+	}
+
+	// Refusals, before anything happens.
+	for _, name := range []string{"postgres", "template1", "missing"} {
+		if _, _, err := Replace(ctx, target, dest, name, tick(), quiet); err == nil {
+			t.Errorf("%s: want an error", name)
+		}
+	}
+
+	// A broken backup never gets near it.
+	data, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	broken := filepath.Join(dir, "broken.backup")
+	if err := os.WriteFile(broken, data[:len(data)/2], 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Replace(ctx, target, broken, "live", tick(), quiet); err == nil {
+		t.Fatal("broken backup: want an error")
+	}
+	stillOriginal("after a broken backup")
+	noTemp("after a broken backup")
+
+	// Nor does stopping partway.
+	stopped, cancel := context.WithCancel(ctx)
+	defer cancel()
+	if _, _, err := Replace(stopped, target, dest, "live", tick(), func(line string) {
+		if strings.HasPrefix(line, "Restoring") {
+			cancel()
+		}
+	}); err == nil {
+		t.Fatal("stopped: want an error")
+	}
+	stillOriginal("after a stop")
+	noTemp("after a stop")
+
+	// A role missing here is a skipped error, which stops it.
+	query(t, server.DSN(), "revoke all on database live from reader; drop role reader; create role reader2")
+	_, _, err = Replace(ctx, target, dest, "live", tick(), quiet)
+	if err == nil || !strings.Contains(err.Error(), `role "reader" does not exist`) {
+		t.Fatalf("missing role: err = %v", err)
+	}
+	stillOriginal("after a missing role")
+	noTemp("after a missing role")
+	query(t, server.DSN(), "create role reader; grant connect on database live to reader")
+
+	// If the swap can't go through, everything is put back.
+	blocked := tick()
+	query(t, server.DSN(), "create database "+oldName("live", blocked))
+	if _, _, err := Replace(ctx, target, dest, "live", blocked, quiet); err == nil {
+		t.Fatal("blocked swap: want an error")
+	}
+	stillOriginal("after a blocked swap")
+	noTemp("after a blocked swap")
+
+	// The real thing, with a connection open that it has to get past.
+	open, err := conn.Open(ctx, live)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer open.Close(ctx)
+	report, old, err := Replace(ctx, target, dest, "live", tick(), quiet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Rows() != 3 {
+		t.Errorf("report = %+v", report)
+	}
+	if got := query(t, live, "select count(*)::text from kept"); got != "3" {
+		t.Errorf("rows = %q", got)
+	}
+	if got := query(t, live, "select tableowner from pg_tables where tablename = 'kept'"); got != "app" {
+		t.Errorf("table owner = %q", got)
+	}
+	if got := query(t, live, "select has_table_privilege('reader', 'kept', 'select')::text"); got != "true" {
+		t.Errorf("reader's grant = %q", got)
+	}
+	if got := query(t, live, "select to_regclass('public.original') is null"); got != "t" && got != "true" {
+		t.Errorf("original table still here: %q", got)
+	}
+	if got := query(t, server.DSN(), "select pg_get_userbyid(datdba) from pg_database where datname = 'live'"); got != "app" {
+		t.Errorf("database owner = %q", got)
+	}
+	if got := query(t, server.DSN(), "select has_database_privilege('reader', 'live', 'connect')::text"); got != "true" {
+		t.Errorf("reader's connect = %q", got)
+	}
+	if got := query(t, server.DSN(), "select has_database_privilege('reader2', 'live', 'connect')::text"); got != "false" {
+		t.Errorf("public can connect, which it couldn't before: %q", got)
+	}
+	if got := query(t, server.DSN(), `select array_to_string(s.setconfig, ',') from pg_db_role_setting s join pg_database d on d.oid = s.setdatabase where d.datname = 'live'`); got != "work_mem=8MB" {
+		t.Errorf("settings = %q", got)
+	}
+	noTemp("after replacing")
+
+	// The way back works: the previous database is whole, and open.
+	if got := query(t, conn.WithDatabase(server.DSN(), old), "select id from original"); got != "42" {
+		t.Errorf("previous database: %q", got)
+	}
+	if !open.IsClosed() {
+		if _, err := open.Exec(ctx, "select 1").ReadAll(); err == nil {
+			t.Error("the old connection survived the swap")
+		}
 	}
 }
 

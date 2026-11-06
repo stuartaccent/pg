@@ -64,6 +64,7 @@ PGIDE_TEST_SERVICE=local go test -race ./...
 - Open in sandbox restores a backup into a throwaway container, which then appears in the service list. It's a copy of real data, bound to `127.0.0.1`, and stays in Docker until you remove it in Backups.
 - Verify proves a backup restores: every table it lists has to arrive, in a throwaway container that's then removed. Connected to the same database, it also compares row counts, which runs `count(*)` on every table there.
 - Restore creates a new database on the connected server. It never touches an existing one, and removes the new one if anything goes wrong. Owners and grants are left out, so everything belongs to the connected user.
+- Replace swaps the connected database for a backup, after you type its name. The backup is restored beside it and checked first, keeping owners and grants, so a bad one changes nothing. Then two renames swap them in moments, disconnecting anyone using it, and the previous database stays as `<name>_old_<date>` until you drop it. To undo, rename them back.
 - Click a result cell to read all of it, format JSON and copy it.
 - Export CSV saves to `~/Downloads`, in a read-only transaction: it runs the query again, so one that writes is refused.
 - Tabs' SQL, history, the last service and pane sizes are kept in the webview's `localStorage`, so history holds whatever you've run.

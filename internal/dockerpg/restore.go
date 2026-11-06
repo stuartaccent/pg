@@ -24,6 +24,8 @@ type Target struct {
 	Image    string // the image matching the server
 }
 
+var serverError = regexp.MustCompile(`ERROR:\s+(.+)`)
+
 var validDatabase = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,62}$`)
 
 // ValidDatabase reports whether name is one pg will create. It's narrower than
@@ -99,7 +101,7 @@ func Restore(ctx context.Context, t Target, backup, database string, progress fu
 		return Report{}, err
 	}
 
-	report, err := fill(ctx, t, image, backup, database, progress)
+	report, err := fill(ctx, t, image, backup, database, false, progress)
 	if err == nil && len(report.Counts) != report.ListedTables {
 		err = errors.New(Report{ListedTables: report.ListedTables, Counts: report.Counts}.Problem())
 	}
@@ -127,8 +129,9 @@ func dropCreated(admin *pgconn.PgConn, database string) error {
 	return err
 }
 
-// fill loads the backup into database and reads back what arrived.
-func fill(ctx context.Context, t Target, image, backup, database string, progress func(string)) (Report, error) {
+// fill loads the backup into database and reads back what arrived. keepOwners
+// keeps the backup's owners and grants, which need the roles to exist.
+func fill(ctx context.Context, t Target, image, backup, database string, keepOwners bool, progress func(string)) (Report, error) {
 	f, err := os.Open(backup)
 	if err != nil {
 		return Report{}, err
@@ -142,14 +145,22 @@ func fill(ctx context.Context, t Target, image, backup, database string, progres
 		"PGUSER=" + t.Settings.User,
 		"PGPASSWORD=" + t.Settings.Password,
 	}
-	restore := command(ctx, env, "run", "--rm", "--init", "--interactive",
+	args := []string{"run", "--rm", "--init", "--interactive",
 		"-e", "PGHOST", "-e", "PGPORT", "-e", "PGUSER", "-e", "PGPASSWORD",
-		image, "pg_restore", "--no-owner", "--no-privileges", "--verbose", "--dbname="+database)
+		image, "pg_restore", "--verbose", "--dbname=" + database}
+	if !keepOwners {
+		args = append(args, "--no-owner", "--no-privileges")
+	}
+	restore := command(ctx, env, args...)
 	restore.Stdin = f
 	var ignored int
+	var firstError string
 	last, err := run(restore, func(line string) {
 		if m := ignoredErrors.FindStringSubmatch(line); m != nil {
 			ignored, _ = strconv.Atoi(m[1])
+		}
+		if m := serverError.FindStringSubmatch(line); m != nil && firstError == "" {
+			firstError = m[1]
 		}
 		progress(line)
 	})
@@ -178,5 +189,5 @@ func fill(ctx context.Context, t Target, image, backup, database string, progres
 	if err != nil {
 		return Report{}, err
 	}
-	return Report{ListedTables: countListedTables(list.String()), Counts: counts, Ignored: ignored}, nil
+	return Report{ListedTables: countListedTables(list.String()), Counts: counts, Ignored: ignored, FirstError: firstError}, nil
 }
