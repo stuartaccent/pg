@@ -7,6 +7,7 @@ import { Compartment, Prec } from "@codemirror/state";
 import { keymap, placeholder } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import { formatDialect, postgresql } from "sql-formatter";
+import { fillParams, paramNames } from "./params.mjs";
 import { warningFor } from "./risky.mjs";
 import { tablesAt } from "./tables.mjs";
 
@@ -153,6 +154,45 @@ function ask(message, enterContinues = false) {
 	});
 }
 
+// askParams asks for the values of names, offering the last ones used, and
+// resolves to them by name, or to nothing if cancelled.
+function askParams(names) {
+	const saved = JSON.parse(localStorage.getItem("params") ?? "{}");
+	const dialog = document.querySelector("#params");
+	const inputs = names.map((name) => {
+		const input = document.createElement("input");
+		input.className = "input input-sm w-full focus:outline-1 focus:outline-offset-0";
+		input.id = `param-${name}`;
+		input.autocomplete = "off";
+		input.spellcheck = false;
+		input.value = saved[name] ?? "";
+		return input;
+	});
+	const labels = names.map((name, i) => {
+		const label = document.createElement("label");
+		label.className = "block text-xs text-base-content/50 mt-3 mb-1 font-mono";
+		label.htmlFor = inputs[i].id;
+		label.textContent = `:${name}`;
+		return [label, inputs[i]];
+	});
+	document.querySelector("#params-fields").replaceChildren(...labels.flat());
+	dialog.returnValue = "";
+	dialog.showModal();
+	inputs[0].select();
+	return new Promise((resolve) => {
+		dialog.addEventListener(
+			"close",
+			() => {
+				if (dialog.returnValue !== "yes") return resolve();
+				const values = Object.fromEntries(names.map((name, i) => [name, inputs[i].value]));
+				localStorage.setItem("params", JSON.stringify({ ...saved, ...values }));
+				resolve(values);
+			},
+			{ once: true },
+		);
+	});
+}
+
 const saveTabs = () => localStorage.setItem("tabs", JSON.stringify([...views.values()].map((view) => view.state.doc.toString())));
 
 function setText(view, text) {
@@ -205,7 +245,7 @@ function formatSQL() {
 	const notice = document.querySelector("#notice");
 	notice.textContent = "";
 	try {
-		setText(view, formatDialect(view.state.doc.toString(), { dialect: postgresql, keywordCase: "lower" }));
+		setText(view, formatDialect(view.state.doc.toString(), { dialect: postgresql, keywordCase: "lower", paramTypes: { named: [":"] } }));
 	} catch (error) {
 		notice.textContent = `Could not format: ${error.message}`;
 	}
@@ -392,8 +432,10 @@ function showCell(td) {
 
 const cellValue = (td) => (td.hasAttribute("data-null") ? "" : td.textContent);
 
-async function copyCell(button, wholeRow) {
-	const text = wholeRow ? [...openCell.parentElement.cells].map(cellValue).join("\t") : cellValue(openCell);
+const copyCell = (button, wholeRow) => copy(button, wholeRow ? [...openCell.parentElement.cells].map(cellValue).join("\t") : cellValue(openCell));
+const copyPlan = (button) => copy(button, button.dataset.plan);
+
+async function copy(button, text) {
 	let copied = true;
 	try {
 		await navigator.clipboard.writeText(text);
@@ -401,7 +443,7 @@ async function copyCell(button, wholeRow) {
 		// The clipboard API needs a secure context, which a webview's scheme may not count as.
 		const scratch = document.createElement("textarea");
 		scratch.value = text;
-		button.closest("dialog").append(scratch);
+		(button.closest("dialog") ?? document.body).append(scratch);
 		scratch.select();
 		copied = document.execCommand("copy");
 		scratch.remove();
@@ -487,7 +529,7 @@ document.addEventListener("keydown", (event) => {
 	resize(bar, sizeOf(bar) + step);
 });
 
-Object.assign(window, { fromMenu, newTab, closeActiveTab, selectTab, closeTab, closeAllTabs, useSQL, useDefinition, resetTree, formatSQL, showHistory, showQueries, useQuery, saveQuery, showActivity, activityLive, showBackups, showRestore, closeRestore, showReplace, checkReplace, closeReplace, renderHistory, copyCell });
+Object.assign(window, { fromMenu, newTab, closeActiveTab, selectTab, closeTab, closeAllTabs, useSQL, useDefinition, resetTree, formatSQL, showHistory, showQueries, useQuery, saveQuery, showActivity, activityLive, showBackups, showRestore, closeRestore, showReplace, checkReplace, closeReplace, renderHistory, copyCell, copyPlan });
 
 // Wails holds back the menu's commands until its runtime says the page is ready.
 // This page doesn't load that runtime, so it says so itself.
@@ -498,12 +540,17 @@ document.addEventListener("click", (event) => {
 	if (td && !event.target.closest("button") && getSelection().isCollapsed) showCell(td);
 });
 
+// The values given for each tab's :names, for htmx:configRequest to use. Export
+// asks before its Save dialog, so they have to wait for its second request.
+const paramValues = new Map();
+
 // Sends the selection rather than the whole editor, and remembers what ran.
 document.addEventListener("htmx:configRequest", (event) => {
 	const { elt, formData, path } = event.detail;
 	if (!formData.has("sql")) return;
 	const sql = sqlToRun(elt);
-	formData.set("sql", sql);
+	formData.set("sql", fillParams(sql, paramValues.get(elt.closest("[data-tab]").dataset.tab) ?? {}));
+	// As typed, so running it again from History asks again.
 	if (path === "/query" && sql.trim()) remember(sql.trim());
 });
 
@@ -533,11 +580,19 @@ document.addEventListener("htmx:confirm", (event) => {
 		ask(elt.dataset.confirm).then((ok) => ok && event.detail.issueRequest(true));
 		return;
 	}
-	if (!elt.matches("form[hx-post='/query']")) return;
-	const warning = warningFor(triggeringEvent?.submitter?.value, sqlToRun(elt));
-	if (!warning) return;
+	const isQuery = elt.matches("form[hx-post='/query']");
+	if (!isQuery && !elt.matches("[hx-post='/export/choose']")) return;
+	const sql = sqlToRun(elt);
+	const names = paramNames(sql);
+	const warning = isQuery ? warningFor(triggeringEvent?.submitter?.value, sql) : "";
+	if (names.length === 0 && !warning) return;
 	event.preventDefault();
-	ask(warning).then((ok) => ok && event.detail.issueRequest(true));
+	(async () => {
+		const values = names.length > 0 ? await askParams(names) : {};
+		if (!values || (warning && !(await ask(warning)))) return;
+		paramValues.set(elt.closest("[data-tab]").dataset.tab, values);
+		event.detail.issueRequest(true);
+	})();
 });
 
 htmx.onLoad(mountNewPanels);

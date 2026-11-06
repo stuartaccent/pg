@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -77,6 +78,79 @@ func TestRun(t *testing.T) {
 				t.Errorf("row = %+v, want [1 NULL]", p.Rows[0])
 			}
 		})
+	}
+}
+
+func TestEachStatementGetsAResult(t *testing.T) {
+	s := newTestSession(t)
+
+	p := s.Run("set search_path = public; select 1 as a; set search_path = public; select 2 as b, 3 as c; set search_path = public")
+	if p.Done || !p.Ended || p.Columns[0] != "a" || p.Total != 1 {
+		t.Fatalf("first page = %+v", p)
+	}
+	if got := strings.Join(p.Tags, ","); got != "SET,SELECT 1,SET" {
+		t.Errorf("first tags = %s", got)
+	}
+	p, err := s.More(p.QueryID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !p.Done || p.Ended || p.NumCols != 2 || p.Columns[1] != "c" || p.Total != 1 || p.Rows[0][0].Text != "2" {
+		t.Fatalf("second page = %+v", p)
+	}
+	if got := strings.Join(p.Tags, ","); got != "SELECT 1,SET" {
+		t.Errorf("second tags = %s", got)
+	}
+}
+
+func TestLaterResultsArePaged(t *testing.T) {
+	s := newTestSession(t)
+
+	p := s.Run(fmt.Sprintf("select generate_series(1, %d); select 'next' as b", PageSize+1))
+	if p.Ended || p.Done || p.Total != PageSize {
+		t.Fatalf("first page = %+v", p)
+	}
+	p, err := s.More(p.QueryID)
+	if err != nil || !p.Ended || p.Columns != nil || p.Total != PageSize+1 {
+		t.Fatalf("second page = %+v, %v", p, err)
+	}
+	p, err = s.More(p.QueryID)
+	if err != nil || !p.Done || p.Columns[0] != "b" || p.Total != 1 {
+		t.Fatalf("third page = %+v, %v", p, err)
+	}
+}
+
+func TestFailingLaterStatementSaysItRolledBack(t *testing.T) {
+	s := newTestSession(t)
+	if p := s.Run("create temp table batch (id int)"); p.Err != nil {
+		t.Fatal(p.Err)
+	}
+
+	p := s.Run("insert into batch values (1); select 1 as a; select 1/0")
+	for !p.Done {
+		var err error
+		if p, err = s.More(p.QueryID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if p.Err == nil || !strings.Contains(p.Err.Error(), "division by zero") || !strings.Contains(p.Err.Error(), "rolled back") {
+		t.Fatalf("err = %v", p.Err)
+	}
+	if p := s.Run("select count(*) from batch"); p.Rows[0][0].Text != "0" {
+		t.Fatalf("not rolled back: %+v", p)
+	}
+
+	// One statement failing has nothing before it to mention.
+	if p := s.Run("select 1/0"); p.Err == nil || strings.Contains(p.Err.Error(), "rolled back") {
+		t.Fatalf("err = %v", p.Err)
+	}
+	// Nor does an open transaction, which the user still has to end.
+	p = s.Run("begin; insert into batch values (1); select 1/0")
+	if p.Err == nil || strings.Contains(p.Err.Error(), "rolled back") {
+		t.Fatalf("err = %v", p.Err)
+	}
+	if p := s.Run("rollback"); p.Err != nil {
+		t.Fatal(p.Err)
 	}
 }
 
@@ -174,7 +248,7 @@ func TestExplain(t *testing.T) {
 	}
 
 	p := s.Explain("delete from explained;", false)
-	if p.Err != nil || !p.Done || len(p.Columns) != 1 || len(p.Rows) == 0 {
+	if p.Err != nil || !p.Done || !strings.Contains(p.Plan, `"Node Type"`) {
 		t.Fatalf("page = %+v", p)
 	}
 
@@ -195,7 +269,7 @@ func TestExplainAnalyzeRollsBack(t *testing.T) {
 	}
 
 	p := s.Explain("delete from analyzed", true)
-	if p.Err != nil || !strings.Contains(p.Rows[0][0].Text, "actual") {
+	if p.Err != nil || !strings.Contains(p.Plan, `"Actual Rows"`) {
 		t.Fatalf("page = %+v", p)
 	}
 	if p := s.Run("select count(*) from analyzed"); p.Err != nil || p.Rows[0][0].Text != "1" {

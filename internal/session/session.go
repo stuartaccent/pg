@@ -5,6 +5,7 @@ package session
 import (
 	"context"
 	"errors"
+	"fmt"
 	"regexp"
 	"sync"
 	"sync/atomic"
@@ -69,7 +70,14 @@ type Page struct {
 	Rows    [][]Value
 	Total   int // rows returned so far, including this page
 
-	// Set once the query has finished.
+	// Plan is what Explain returns instead of rows: the plan as JSON.
+	Plan string
+
+	// Ended is set on a result's last page when another result follows, which
+	// More returns next, with its own Columns.
+	Ended bool
+
+	// Set once the query has finished, and Tags and Elapsed also when Ended.
 	Done    bool
 	Tags    []string // command tags, e.g. "SELECT 12", "UPDATE 3"
 	Err     error
@@ -98,6 +106,7 @@ type query struct {
 	timer   *time.Timer // ends it if the next page isn't asked for
 	mrr     *pgconn.MultiResultReader
 	rr      *pgconn.ResultReader // the result set being paged, once found
+	ran     int                  // statements finished so far
 	cancel  context.CancelFunc
 	start   time.Time     // when the current page began
 	elapsed time.Duration // time spent on earlier pages
@@ -114,8 +123,8 @@ func New(conn *pgconn.PgConn, connect func(context.Context) (*pgconn.PgConn, err
 
 // Run cancels whatever is running, starts sql and returns its first page.
 //
-// sql may hold several statements. The first one that returns columns is
-// shown as the grid; the others only contribute their command tags.
+// sql may hold several statements. Each one that returns columns is a result
+// of its own, see Page.Ended; the others only contribute their command tags.
 func (s *Session) Run(sql string) Page {
 	s.Cancel()
 
@@ -135,8 +144,8 @@ func (s *Session) Run(sql string) Page {
 	return s.readPage(q)
 }
 
-// Explain cancels whatever is running and returns sql's plan. With analyze it
-// also runs sql, inside a transaction that is rolled back.
+// Explain cancels whatever is running and returns sql's plan in Page.Plan. With
+// analyze it also runs sql, inside a transaction that is rolled back.
 //
 // It uses the extended protocol, which refuses more than one statement. Over
 // Run, "select 1; delete from t" would explain the select and run the delete.
@@ -151,7 +160,7 @@ func (s *Session) Explain(sql string, analyze bool) Page {
 	}
 	defer q.cancel()
 
-	stmt := "explain " + sql
+	stmt := "explain (format json) " + sql
 	if analyze {
 		// Rolling back would also undo whatever the user has open.
 		if s.conn.TxStatus() != 'I' {
@@ -161,7 +170,7 @@ func (s *Session) Explain(sql string, analyze bool) Page {
 			return Page{QueryID: q.id, Done: true, Err: err}
 		}
 		defer s.rollback()
-		stmt = "explain analyze " + sql
+		stmt = "explain (analyze, buffers, format json) " + sql
 	}
 
 	res := s.conn.ExecParams(ctx, stmt, nil, nil, nil, nil).Read()
@@ -169,12 +178,7 @@ func (s *Session) Explain(sql string, analyze bool) Page {
 	if res.Err != nil {
 		return p
 	}
-	p.Columns, p.NumCols = []string{"QUERY PLAN"}, 1
-	p.Rows = make([][]Value, len(res.Rows))
-	for i, row := range res.Rows {
-		p.Rows[i] = copyRow(row)
-	}
-	p.Total = len(p.Rows)
+	p.Plan = string(res.Rows[0][0])
 	return p
 }
 
@@ -266,21 +270,11 @@ func (s *Session) Close(ctx context.Context) error {
 func (s *Session) readPage(q *query) Page {
 	p := Page{QueryID: q.id}
 
-	// Skip statements that return no columns (SET, UPDATE, ...) until we
-	// reach one we can show as a grid.
-	for q.rr == nil {
-		if !q.mrr.NextResult() {
-			return s.finish(q, p)
-		}
-		rr := q.mrr.ResultReader()
-		if len(rr.FieldDescriptions()) == 0 {
-			if tag, err := rr.Close(); err == nil {
-				q.tags = append(q.tags, tag.String())
-			}
-			continue
-		}
-		q.rr = rr
-		fields := rr.FieldDescriptions()
+	if q.rr == nil && !q.nextResult() {
+		return s.finish(q, p)
+	}
+	if q.ncols == 0 {
+		fields := q.rr.FieldDescriptions()
 		p.Columns = make([]string, len(fields))
 		for i, f := range fields {
 			p.Columns[i] = f.Name
@@ -291,14 +285,10 @@ func (s *Session) readPage(q *query) Page {
 
 	p.Rows = make([][]Value, 0, PageSize)
 	size := 0
+	more := true
 	for len(p.Rows) < PageSize && size < maxPageBytes {
-		if !q.rr.NextRow() {
-			q.total += len(p.Rows)
-			p.Total = q.total
-			if tag, err := q.rr.Close(); err == nil {
-				q.tags = append(q.tags, tag.String())
-			}
-			return s.finish(q, p)
+		if more = q.rr.NextRow(); !more {
+			break
 		}
 		values := q.rr.Values()
 		for _, v := range values {
@@ -308,11 +298,40 @@ func (s *Session) readPage(q *query) Page {
 	}
 	q.total += len(p.Rows)
 	p.Total = q.total
+	if !more {
+		q.closeResult(q.rr)
+		if !q.nextResult() {
+			return s.finish(q, p)
+		}
+		p.Ended, p.Tags, p.Elapsed = true, q.tags, q.elapsed+time.Since(q.start)
+		q.tags, q.ncols, q.total = nil, 0, 0
+	}
 	q.elapsed += time.Since(q.start)
 	// An unread result keeps the query running on the server, with its locks,
 	// so it only gets so long.
 	q.timer = time.AfterFunc(s.idle, func() { s.expire(q) })
 	return p // probably more to come
+}
+
+// nextResult moves on to the next statement that returns columns, reporting
+// whether there was one. Those that don't (SET, UPDATE, ...) leave their tags.
+func (q *query) nextResult() bool {
+	for q.mrr.NextResult() {
+		rr := q.mrr.ResultReader()
+		if len(rr.FieldDescriptions()) > 0 {
+			q.rr = rr
+			return true
+		}
+		q.closeResult(rr)
+	}
+	return false
+}
+
+func (q *query) closeResult(rr *pgconn.ResultReader) {
+	if tag, err := rr.Close(); err == nil {
+		q.tags = append(q.tags, tag.String())
+		q.ran++
+	}
 }
 
 // expire ends q if it's still waiting for its next page.
@@ -327,15 +346,15 @@ func (s *Session) expire(q *query) {
 	s.expired = &Page{QueryID: q.id, NumCols: q.ncols, Total: q.total, Done: true, Err: ErrExpired}
 }
 
-// finish drains the remaining statements, records the outcome on p and
-// clears the current query. Must be called with mu held.
+// finish records the outcome on p and clears the current query. Must be called
+// with mu held.
 func (s *Session) finish(q *query, p Page) Page {
-	for q.mrr.NextResult() {
-		if tag, err := q.mrr.ResultReader().Close(); err == nil {
-			q.tags = append(q.tags, tag.String())
-		}
-	}
 	p.Err = q.mrr.Close()
+	// Statements sent together are one transaction, so results already on
+	// screen can look like they took effect.
+	if p.Err != nil && q.ran > 0 && s.conn.TxStatus() == 'I' {
+		p.Err = fmt.Errorf("%w\nThe statements before it were rolled back too, unless the script committed them", p.Err)
+	}
 	p.Done = true
 	p.Tags = q.tags
 	p.Total = q.total
