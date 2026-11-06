@@ -596,7 +596,7 @@ templ planStep(n *planNode) {
 			<dl class="grid grid-cols-[auto_1fr] gap-x-3 ml-24 my-1 text-xs">
 				for _, d := range n.Details {
 					<dt class="text-base-content/60">{ d.Name }</dt>
-					<dd class="font-mono whitespace-pre-wrap break-words min-w-0">{ d.Value }</dd>
+					<dd class="font-mono whitespace-pre-wrap wrap-break-word min-w-0">{ d.Value }</dd>
 				}
 			</dl>
 		</details>
