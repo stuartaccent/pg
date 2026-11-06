@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"pg/internal/conn"
+	"pg/internal/session"
 )
 
 func get(t *testing.T, s *Server, method, url string) *httptest.ResponseRecorder {
@@ -98,7 +99,7 @@ func TestSaveCSV(t *testing.T) {
 	t.Setenv("PGPASSFILE", passwords)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	connect := func(ctx context.Context) (*pgconn.PgConn, error) { return conn.Connect(ctx, service) }
+	connect := func(ctx context.Context) (*pgconn.PgConn, error) { return conn.Open(ctx, conn.ServiceDSN(service)) }
 
 	path, rows, err := saveCSV(context.Background(), connect, "select 1 as a")
 	if err != nil || rows != 1 {
@@ -589,5 +590,67 @@ func TestCloseWaitsForAJobToCleanUp(t *testing.T) {
 	s.Close()
 	if !cleaned.Load() {
 		t.Error("Close returned before the job had cleaned up")
+	}
+}
+
+func postConnect(s *Server, service string) *httptest.ResponseRecorder {
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/connect", strings.NewReader(url.Values{"service": {service}}.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	s.Handler().ServeHTTP(w, req)
+	return w
+}
+
+func TestConnectToAnotherDatabaseOnAService(t *testing.T) {
+	service := os.Getenv("PGIDE_TEST_SERVICE")
+	if service == "" {
+		t.Skip("PGIDE_TEST_SERVICE not set")
+	}
+	s := New()
+	defer s.Close()
+	target := service + "/postgres"
+	w := postConnect(s, target)
+	if body := w.Body.String(); !strings.Contains(body, "Connected to "+target) {
+		t.Fatalf("body = %q", body)
+	}
+	if got := s.settings.Database; got != "postgres" {
+		t.Errorf("settings say %q", got)
+	}
+	sess := s.session("1")
+	if p := sess.Run("select current_database()"); p.Err != nil || p.Rows[0][0].Text != "postgres" {
+		t.Fatalf("page = %+v", p)
+	}
+	// What the page does next: the dropdown has to keep showing where it is.
+	if body := get(t, s, http.MethodGet, "/services").Body.String(); !strings.Contains(body, `value="`+target+`" selected`) {
+		t.Errorf("services = %q", body)
+	}
+}
+
+func TestSlashesInConnections(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "services")
+	t.Setenv("PGSERVICEFILE", file)
+	if err := os.WriteFile(file, []byte("[team/app]\nhost=localhost\nport=1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Both reach the connection attempt, which fails on the port, not the name.
+	for _, service := range []string{"team/app", "team/app/other"} {
+		body := postConnect(New(), service).Body.String()
+		if service == "team/app" && strings.Contains(body, "unknown service") {
+			t.Errorf("%s: %q", service, body)
+		}
+		if service != "team/app" && !strings.Contains(body, "unknown service") {
+			t.Errorf("%s: want unknown service: %q", service, body)
+		}
+	}
+}
+
+func TestExpiredResultSaysSo(t *testing.T) {
+	var b strings.Builder
+	p := session.Page{Done: true, NumCols: 3, Total: 500, Err: session.ErrExpired}
+	if err := MoreRows(p, "1").Render(context.Background(), &b); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(b.String(), "run it again for the rest") || !strings.Contains(b.String(), `colspan="3"`) {
+		t.Errorf("rows = %q", b.String())
 	}
 }

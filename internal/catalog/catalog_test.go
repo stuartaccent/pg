@@ -23,7 +23,7 @@ func newTestCatalog(t *testing.T) *Catalog {
 	if service == "" {
 		t.Skip("PGIDE_TEST_SERVICE not set")
 	}
-	c := New(func(ctx context.Context) (*pgconn.PgConn, error) { return conn.Connect(ctx, service) })
+	c := New(func(ctx context.Context) (*pgconn.PgConn, error) { return conn.Open(ctx, conn.ServiceDSN(service)) })
 	t.Cleanup(func() { _ = c.Close(context.Background()) })
 	return c
 }

@@ -48,7 +48,7 @@ func TestReadOnly(t *testing.T) {
 	t.Setenv("PGSERVICEFILE", file)
 
 	for name, want := range map[string]bool{"plain": false, "locked": true} {
-		c, err := Connect(context.Background(), name)
+		c, err := Open(context.Background(), ServiceDSN(name))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -85,7 +85,7 @@ func TestExport(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			c, err := Connect(ctx, service)
+			c, err := Open(ctx, ServiceDSN(service))
 			if err != nil {
 				t.Fatal(err)
 			}
