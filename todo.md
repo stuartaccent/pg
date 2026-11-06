@@ -111,3 +111,4 @@ Built along the way, outside the lists above.
 ### Fixes
 
 - [x] Stop WebKit reusing responses, which left the tree empty in the desktop app.
+- [x] Audit: a late Stop reporting failure, leftovers on quit, unread results holding locks, unbounded pages, and failing after a lost connection, which now also reports a lost transaction.

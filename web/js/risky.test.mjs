@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { writesEveryRow } from "./risky.mjs";
+import { warningFor, writesEveryRow } from "./risky.mjs";
 
 const risky = [
 	"delete from t",
@@ -39,3 +39,18 @@ const safe = [
 
 for (const sql of risky) test(`risky: ${sql}`, () => assert.equal(writesEveryRow(sql), true));
 for (const sql of safe) test(`safe: ${sql}`, () => assert.equal(writesEveryRow(sql), false));
+
+test("Run warns about a write to every row, and nothing else", () => {
+	assert.match(warningFor(undefined, "delete from t"), /no where clause/);
+	assert.equal(warningFor(undefined, "delete from t where id = 1"), "");
+	assert.equal(warningFor(undefined, "select 1"), "");
+});
+
+test("Explain doesn't run anything, so doesn't warn", () => {
+	assert.equal(warningFor("1", "delete from t"), "");
+});
+
+test("Analyze always warns, as it runs the query", () => {
+	assert.match(warningFor("analyze", "select 1"), /really runs/);
+	assert.match(warningFor("analyze", "delete from t"), /really runs/);
+});
