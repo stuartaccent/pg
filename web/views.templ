@@ -34,19 +34,7 @@ templ Index(services []string, current string, readOnly bool, j jobView, err err
 						@serviceSelect(services, current)
 					</span>
 				</form>
-				<span id="status" class="flex-1 min-w-0">
-					if err != nil {
-						<span class="text-error whitespace-pre-wrap">{ err.Error() }</span>
-					} else if len(services) == 0 {
-						<span class="text-base-content/60">No services found in ~/.pg_service.conf</span>
-					} else if current != "" {
-						@ConnectStatus(current, readOnly, nil)
-					}
-				</span>
-				<span id="job" class="min-w-0 max-w-md">
-					@JobStatus(j)
-				</span>
-				<button type="button" class="btn btn-ghost btn-sm" onclick="showActivity()">Activity</button>
+				<button type="button" class="btn btn-ghost btn-sm ml-auto" onclick="showActivity()">Activity</button>
 				<button type="button" class="btn btn-ghost btn-sm" onclick="showBackups()">Backups</button>
 				<details class="dropdown dropdown-end">
 					<summary class="btn btn-ghost btn-sm">Config</summary>
@@ -57,7 +45,7 @@ templ Index(services []string, current string, readOnly bool, j jobView, err err
 				</details>
 				<button type="button" class="btn btn-square btn-ghost btn-sm" aria-label="Toggle light or dark theme" onclick="toggleTheme()">◐</button>
 			</header>
-			<div class="flex flex-1 min-h-0 gap-2 px-2 pb-2">
+			<div class="flex flex-1 min-h-0 gap-2 px-2">
 				<aside class="flex flex-col w-(--sidebar-width) shrink-0 overflow-hidden rounded-box bg-base-100 shadow-md">
 					<div class="flex items-center gap-1 px-2 pt-2">
 						<input
@@ -92,6 +80,22 @@ templ Index(services []string, current string, readOnly bool, j jobView, err err
 					</div>
 				</div>
 			</div>
+			<!-- Grows for an error, rather than cutting it off. -->
+			<footer class="flex items-center gap-4 min-h-7 shrink-0 px-3 py-1 bg-base-100 border-t border-base-300 text-xs">
+				<span id="status" class="flex-1 min-w-0">
+					if err != nil {
+						<span class="text-error whitespace-pre-wrap">{ err.Error() }</span>
+					} else if len(services) == 0 {
+						<span class="text-base-content/60">No services found in ~/.pg_service.conf</span>
+					} else if current != "" {
+						@ConnectStatus(current, readOnly, nil)
+					}
+				</span>
+				<span id="notice" class="min-w-0 max-w-[50%] truncate"></span>
+				<span id="job" class="min-w-0 max-w-[50%]">
+					@JobStatus(j)
+				</span>
+			</footer>
 			<dialog id="confirm" class="modal">
 				<form method="dialog" class="modal-box">
 					<p id="confirm-text" class="whitespace-pre-wrap"></p>
@@ -224,8 +228,8 @@ templ tabPanel(id string) {
 			<button type="button" class="btn btn-ghost btn-sm" onclick="formatSQL()">Format</button>
 			<!-- Two steps, as the Save dialog can stay open a while and that isn't
 			     running anything: Running… only belongs to the second. -->
-			<button id={ "export-" + id } type="button" class="btn btn-ghost btn-sm" hx-post="/export/choose" hx-vals={ fmt.Sprintf(`{"tab":%q}`, id) } hx-target={ "#notice-" + id }>Export CSV</button>
-			<span class="hidden" hx-post="/export" hx-trigger={ "export-ready from:#export-" + id } hx-include={ "#editor-" + id } hx-target={ "#notice-" + id } hx-indicator={ "#running-" + id }></span>
+			<button id={ "export-" + id } type="button" class="btn btn-ghost btn-sm" hx-post="/export/choose" hx-vals={ fmt.Sprintf(`{"tab":%q}`, id) } hx-target="#notice">Export CSV</button>
+			<span class="hidden" hx-post="/export" hx-trigger={ "export-ready from:#export-" + id } hx-include={ "#editor-" + id } hx-target="#notice" hx-indicator={ "#running-" + id }></span>
 			<button type="button" class="btn btn-ghost btn-sm" onclick="showHistory()">History</button>
 			<button type="button" class="btn btn-ghost btn-sm" onclick="showQueries()">Queries</button>
 			<button type="button" class="btn btn-ghost btn-sm" onclick="saveQuery()">Save</button>
@@ -233,7 +237,6 @@ templ tabPanel(id string) {
 				<span class="loading loading-spinner loading-xs"></span>
 				Running… <span class="timer tabular-nums"></span>
 			</span>
-			<span id={ "notice-" + id } class="min-w-0 truncate"></span>
 		</div>
 		<main id={ "results-" + id } class="results flex-1 min-h-0 overflow-auto rounded-box bg-base-100 shadow-md"></main>
 	</section>

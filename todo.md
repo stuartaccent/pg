@@ -86,6 +86,7 @@ Built along the way, outside the lists above.
 - [x] Minimum window size, and a background matching the theme while loading.
 - [x] Choose where an export goes with a native Save dialog.
 - [x] Save queries with the same dialog, offering the query the tab came from.
+- [x] Status bar for the connection, the running job and the latest message.
 
 ### Tree
 
