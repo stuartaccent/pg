@@ -25,6 +25,15 @@ options=-c default_transaction_read_only=on
 go run ./cmd/pgide          # the desktop app (needs Xcode command line tools for cgo)
 ```
 
+To use it like any other app, with its name and icon in the Dock:
+
+```sh
+scripts/bundle.sh                 # builds dist/pg.app
+cp -R dist/pg.app /Applications
+```
+
+It keeps its own tabs, history and settings, separate from `go run`.
+
 ## Work on the UI
 
 ```sh
