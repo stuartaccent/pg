@@ -104,7 +104,7 @@ func Index(services []string, current string, readOnly bool, j jobView, err erro
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "</div></div></div><!-- Grows for an error, rather than cutting it off. --><footer class=\"flex items-center gap-4 min-h-7 shrink-0 px-3 py-1 bg-base-100 border-t border-base-300 text-xs\"><span id=\"status\" class=\"flex-1 min-w-0\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "</div></div></div><!-- Grows for an error, rather than cutting it off. --><footer class=\"flex items-center gap-4 min-h-9 shrink-0 px-4 py-1 bg-base-100 border-t border-base-300 text-xs\"><span id=\"status\" class=\"flex-1 min-w-0\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
