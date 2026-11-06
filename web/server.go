@@ -50,9 +50,12 @@ type Server struct {
 	cat      *catalog.Catalog                              // guarded by mu
 	lastTab  int                                           // guarded by mu
 	job      *job                                          // guarded by mu; the latest one
+	exportTo map[string]string                             // guarded by mu; where a tab's export was told to go
 }
 
-func New() *Server { return &Server{sessions: map[string]*session.Session{}} }
+func New() *Server {
+	return &Server{sessions: map[string]*session.Session{}, exportTo: map[string]string{}}
+}
 
 // Handler returns the app's routes.
 func (s *Server) Handler() http.Handler {
@@ -78,6 +81,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /query", s.query)
 	mux.HandleFunc("GET /query/{id}/more", s.more)
 	mux.HandleFunc("POST /cancel", s.cancel)
+	mux.HandleFunc("POST /export/choose", s.chooseExport)
 	mux.HandleFunc("POST /export", s.export)
 	mux.HandleFunc("GET /tree", s.tree)
 	mux.HandleFunc("GET /definition", s.definition)
@@ -365,25 +369,47 @@ func (s *Server) cancel(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *Server) export(w http.ResponseWriter, r *http.Request) {
+// chooseExport is an export's first step: it asks where to save, then tells the
+// page to start. The path stays here, so the page can't name one for /export.
+func (s *Server) chooseExport(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
-	connect := s.connect
+	connected := s.connect != nil
+	s.mu.Unlock()
+	if !connected {
+		render(w, r, ExportStatus("", 0, errors.New("connect to a service first")))
+		return
+	}
+	if s.ChooseExport != nil {
+		path, err := s.ChooseExport("export.csv")
+		if err != nil {
+			render(w, r, ExportStatus("", 0, err))
+			return
+		}
+		if path == "" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		s.mu.Lock()
+		s.exportTo[r.FormValue("tab")] = path
+		s.mu.Unlock()
+	}
+	w.Header().Set("HX-Trigger", "export-ready")
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) export(w http.ResponseWriter, r *http.Request) {
+	tab := r.FormValue("tab")
+	s.mu.Lock()
+	connect, chosen := s.connect, s.exportTo[tab]
+	delete(s.exportTo, tab)
 	s.mu.Unlock()
 	if connect == nil {
 		render(w, r, ExportStatus("", 0, errors.New("connect to a service first")))
 		return
 	}
-	var chosen string
-	if s.ChooseExport != nil {
-		var err error
-		if chosen, err = s.ChooseExport("export.csv"); err != nil {
-			render(w, r, ExportStatus("", 0, err))
-			return
-		}
-		if chosen == "" {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
+	if s.ChooseExport != nil && chosen == "" {
+		render(w, r, ExportStatus("", 0, errors.New("choose where to save first")))
+		return
 	}
 	path, rows, err := saveCSV(r.Context(), connect, r.FormValue("sql"), chosen)
 	render(w, r, ExportStatus(path, rows, err))

@@ -476,9 +476,11 @@ document.addEventListener("htmx:beforeSend", (event) => {
 	timer.interval = setInterval(() => (timer.textContent = `${((performance.now() - start) / 1000).toFixed(1)}s`), 100);
 });
 
+// Only what started the timer stops it: choosing where to export finishes just
+// after the export itself has started.
 document.addEventListener("htmx:afterRequest", (event) => {
 	const timer = event.detail.elt.closest?.("[data-tab]")?.querySelector(".timer");
-	if (timer) clearInterval(timer.interval);
+	if (timer && event.detail.requestConfig?.formData?.has("sql")) clearInterval(timer.interval);
 });
 
 // Runs before htmx sends a query, for the ones worth a second thought.

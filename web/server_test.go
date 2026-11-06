@@ -368,13 +368,56 @@ func TestCancellingTheExportDialog(t *testing.T) {
 		t.Error("cancelling shouldn't connect")
 		return nil, errors.New("no")
 	}
+	choose := func() *httptest.ResponseRecorder { return postForm(s, "/export/choose", url.Values{"tab": {"1"}}) }
 	s.ChooseExport = func(string) (string, error) { return "", nil }
-	if got := postForm(s, "/export", url.Values{"sql": {"select 1"}}).Code; got != http.StatusNoContent {
-		t.Errorf("status = %d", got)
+	if w := choose(); w.Code != http.StatusNoContent || w.Header().Get("HX-Trigger") != "" {
+		t.Errorf("cancelled = %d, trigger %q", w.Code, w.Header().Get("HX-Trigger"))
 	}
 	s.ChooseExport = func(string) (string, error) { return "", errors.New("no dialog") }
-	if body := postForm(s, "/export", url.Values{"sql": {"select 1"}}).Body.String(); !strings.Contains(body, "no dialog") {
+	if body := choose().Body.String(); !strings.Contains(body, "no dialog") {
 		t.Errorf("failure not shown: %q", body)
+	}
+}
+
+func TestExportStartsOnceAPlaceIsChosen(t *testing.T) {
+	s := New()
+	connected := make(chan struct{}, 1)
+	s.connect = func(context.Context) (*pgconn.PgConn, error) {
+		connected <- struct{}{}
+		return nil, errors.New("no server here")
+	}
+	dir := t.TempDir()
+	s.ChooseExport = func(string) (string, error) { return filepath.Join(dir, "out.csv"), nil }
+	form := url.Values{"tab": {"1"}, "sql": {"select 1"}}
+
+	// The page can't skip the dialog, or name a path of its own.
+	if body := postForm(s, "/export", form).Body.String(); !strings.Contains(body, "choose where") {
+		t.Errorf("no choice = %q", body)
+	}
+	w := postForm(s, "/export/choose", form)
+	if w.Header().Get("HX-Trigger") != "export-ready" {
+		t.Fatalf("trigger = %q", w.Header().Get("HX-Trigger"))
+	}
+	if strings.Contains(w.Body.String(), dir) {
+		t.Error("the path went to the page")
+	}
+	postForm(s, "/export", form)
+	select {
+	case <-connected:
+	default:
+		t.Error("the export didn't start")
+	}
+	// A choice is good for one export.
+	if body := postForm(s, "/export", form).Body.String(); !strings.Contains(body, "choose where") {
+		t.Errorf("second export = %q", body)
+	}
+}
+
+func TestExportWithoutADialogGoesStraightThrough(t *testing.T) {
+	s := New()
+	s.connect = func(context.Context) (*pgconn.PgConn, error) { return nil, errors.New("no") }
+	if got := postForm(s, "/export/choose", url.Values{"tab": {"1"}}).Header().Get("HX-Trigger"); got != "export-ready" {
+		t.Errorf("trigger = %q", got)
 	}
 }
 
