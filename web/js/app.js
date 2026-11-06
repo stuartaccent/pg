@@ -224,7 +224,8 @@ async function showBackups() {
 
 function showRestore(button) {
 	const { file, name, service } = button.dataset;
-	document.querySelector("#restore-text").textContent = `${file} to ${service}, as:`;
+	document.querySelector("#restore-backup").textContent = file;
+	document.querySelector("#restore-service").textContent = service;
 	document.querySelector("#restore-file").value = file;
 	document.querySelector("#restore-name").value = name;
 	document.querySelector("#restore").showModal();
