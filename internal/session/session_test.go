@@ -304,3 +304,92 @@ func TestLosingATransactionIsReported(t *testing.T) {
 		t.Fatalf("after: %+v", p)
 	}
 }
+
+func TestUnreadResultExpires(t *testing.T) {
+	s := newTestSession(t)
+	s.idle = 100 * time.Millisecond
+
+	p := s.Run("select g from generate_series(1, 2000) g")
+	if p.Done {
+		t.Fatal("expected more than one page")
+	}
+	// Asking in time carries on, and resets the clock.
+	time.Sleep(60 * time.Millisecond)
+	if p, err := s.More(p.QueryID); err != nil || p.Err != nil || len(p.Rows) != PageSize {
+		t.Fatalf("page = %+v, err = %v", p, err)
+	}
+	time.Sleep(60 * time.Millisecond)
+	p, err := s.More(p.QueryID)
+	if err != nil || p.Done {
+		t.Fatalf("page = %+v, err = %v", p, err)
+	}
+
+	time.Sleep(300 * time.Millisecond)
+	end, err := s.More(p.QueryID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !errors.Is(end.Err, ErrExpired) || !end.Done || end.Total != 3*PageSize || end.NumCols != 1 {
+		t.Fatalf("end = %+v", end)
+	}
+	// The session is fine afterwards, and a finished query never expires.
+	if p := s.Run("select 1"); p.Err != nil {
+		t.Fatal(p.Err)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if p := s.Run("select 2 as still_here"); p.Err != nil || p.Rows[0][0].Text != "2" {
+		t.Fatalf("page = %+v", p)
+	}
+}
+
+func TestPagesStopAtASize(t *testing.T) {
+	s := newTestSession(t)
+	p := s.Run("select repeat('x', 1024 * 1024) from generate_series(1, 20)")
+	if p.Err != nil || p.Done {
+		t.Fatalf("done = %v, err = %v", p.Done, p.Err)
+	}
+	if len(p.Rows) != 8 {
+		t.Errorf("first page has %d rows, want 8", len(p.Rows))
+	}
+	total := len(p.Rows)
+	for !p.Done {
+		var err error
+		if p, err = s.More(p.QueryID); err != nil {
+			t.Fatal(err)
+		}
+		total += len(p.Rows)
+	}
+	if total != 20 || p.Total != 20 {
+		t.Errorf("got %d rows, Total = %d", total, p.Total)
+	}
+}
+
+func TestLastPageExactlyFull(t *testing.T) {
+	s := newTestSession(t)
+	p := s.Run("select g from generate_series(1, 500) g")
+	if p.Done {
+		t.Fatal("a full page can't know it's the last")
+	}
+	if p, err := s.More(p.QueryID); err != nil || !p.Done || p.Total != 500 || len(p.Rows) != 0 {
+		t.Fatalf("page = %+v, err = %v", p, err)
+	}
+}
+
+func TestCopyToTheClientIsRefused(t *testing.T) {
+	s := newTestSession(t)
+	for _, sql := range []string{
+		"copy t from stdin",
+		"COPY t (a, b) FROM STDIN WITH (FORMAT csv)",
+		"copy (select 1) to stdout",
+		"select 1; copy t from stdin",
+	} {
+		if p := s.Run(sql); !errors.Is(p.Err, ErrCopy) {
+			t.Errorf("%q: err = %v", sql, p.Err)
+		}
+	}
+	for _, sql := range []string{"select 'copy to stdout'", "select 1 as copy"} {
+		if p := s.Run(sql); p.Err != nil {
+			t.Errorf("%q: %v", sql, p.Err)
+		}
+	}
+}

@@ -5,6 +5,7 @@ package session
 import (
 	"context"
 	"errors"
+	"regexp"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -14,8 +15,25 @@ import (
 	"pg/internal/conn"
 )
 
-// PageSize is the number of rows returned per page.
-const PageSize = 500
+const (
+	// PageSize is the most rows returned per page.
+	PageSize = 500
+	// maxPageBytes also ends a page, as a few hundred rows of large values could
+	// otherwise be gigabytes by the time they reach the window.
+	maxPageBytes = 8 << 20
+	// idleLimit is how long an unfinished query waits for its next page.
+	idleLimit = 5 * time.Minute
+)
+
+// copyToClient matches COPY to or from the client. Nothing here can feed one,
+// so the server would wait for ever, and nothing can show what one sends.
+var copyToClient = regexp.MustCompile(`(?is)(?:^|;)\s*copy\b[^;]*\b(?:from\s+stdin|to\s+stdout)\b`)
+
+// ErrCopy is why a COPY to or from the client isn't run.
+var ErrCopy = errors.New("pg can't run COPY to or from the client: use a file on the server, or Export CSV")
+
+// ErrExpired ends a result whose next page wasn't asked for in time.
+var ErrExpired = errors.New("stopped after five minutes without scrolling, so it wouldn't keep holding locks: run it again for the rest")
 
 // ErrStale is returned by More when the query it refers to is no longer the
 // current one (a newer query replaced it, or it already finished).
@@ -64,10 +82,12 @@ type Page struct {
 type Session struct {
 	connect func(context.Context) (*pgconn.PgConn, error)
 
-	mu     sync.Mutex
-	conn   *pgconn.PgConn // guarded by mu
-	q      *query         // guarded by mu; the current unfinished query
-	closed bool           // guarded by mu
+	mu      sync.Mutex
+	conn    *pgconn.PgConn // guarded by mu
+	q       *query         // guarded by mu; the current unfinished query
+	closed  bool           // guarded by mu
+	expired *Page          // guarded by mu; how the last query to expire ended
+	idle    time.Duration  // how long a query waits for its next page
 
 	cancelMu sync.Mutex
 	cancel   context.CancelFunc // cancels the most recent query
@@ -75,6 +95,7 @@ type Session struct {
 
 type query struct {
 	id      uint64
+	timer   *time.Timer // ends it if the next page isn't asked for
 	mrr     *pgconn.MultiResultReader
 	rr      *pgconn.ResultReader // the result set being paged, once found
 	cancel  context.CancelFunc
@@ -88,7 +109,7 @@ type query struct {
 // New returns a session using conn, which may be nil to connect on first use.
 // connect is used for that and to reconnect if the connection is lost.
 func New(conn *pgconn.PgConn, connect func(context.Context) (*pgconn.PgConn, error)) *Session {
-	return &Session{conn: conn, connect: connect}
+	return &Session{conn: conn, connect: connect, idle: idleLimit}
 }
 
 // Run cancels whatever is running, starts sql and returns its first page.
@@ -103,6 +124,10 @@ func (s *Session) Run(sql string) Page {
 	ctx, q, err := s.begin()
 	if err != nil {
 		return Page{QueryID: q.id, Done: true, Err: err}
+	}
+	if copyToClient.MatchString(sql) {
+		q.cancel()
+		return Page{QueryID: q.id, Done: true, Err: ErrCopy}
 	}
 
 	q.mrr = s.conn.Exec(ctx, sql)
@@ -204,9 +229,13 @@ func (s *Session) begin() (context.Context, *query, error) {
 func (s *Session) More(id uint64) (Page, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.expired != nil && s.expired.QueryID == id {
+		return *s.expired, nil
+	}
 	if s.q == nil || s.q.id != id {
 		return Page{}, ErrStale
 	}
+	s.q.timer.Stop()
 	s.q.start = time.Now()
 	return s.readPage(s.q), nil
 }
@@ -261,20 +290,41 @@ func (s *Session) readPage(q *query) Page {
 	p.NumCols = q.ncols
 
 	p.Rows = make([][]Value, 0, PageSize)
-	for len(p.Rows) < PageSize && q.rr.NextRow() {
-		p.Rows = append(p.Rows, copyRow(q.rr.Values()))
+	size := 0
+	for len(p.Rows) < PageSize && size < maxPageBytes {
+		if !q.rr.NextRow() {
+			q.total += len(p.Rows)
+			p.Total = q.total
+			if tag, err := q.rr.Close(); err == nil {
+				q.tags = append(q.tags, tag.String())
+			}
+			return s.finish(q, p)
+		}
+		values := q.rr.Values()
+		for _, v := range values {
+			size += len(v)
+		}
+		p.Rows = append(p.Rows, copyRow(values))
 	}
 	q.total += len(p.Rows)
 	p.Total = q.total
-	if len(p.Rows) == PageSize {
-		q.elapsed += time.Since(q.start)
-		return p // probably more to come
-	}
+	q.elapsed += time.Since(q.start)
+	// An unread result keeps the query running on the server, with its locks,
+	// so it only gets so long.
+	q.timer = time.AfterFunc(s.idle, func() { s.expire(q) })
+	return p // probably more to come
+}
 
-	if tag, err := q.rr.Close(); err == nil {
-		q.tags = append(q.tags, tag.String())
+// expire ends q if it's still waiting for its next page.
+func (s *Session) expire(q *query) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.q != q {
+		return
 	}
-	return s.finish(q, p)
+	q.cancel()
+	s.closeQuery()
+	s.expired = &Page{QueryID: q.id, NumCols: q.ncols, Total: q.total, Done: true, Err: ErrExpired}
 }
 
 // finish drains the remaining statements, records the outcome on p and
@@ -303,6 +353,9 @@ func (s *Session) finish(q *query, p Page) Page {
 func (s *Session) closeQuery() {
 	if s.q == nil {
 		return
+	}
+	if s.q.timer != nil {
+		s.q.timer.Stop()
 	}
 	_ = s.q.mrr.Close()
 	s.q.cancel()
