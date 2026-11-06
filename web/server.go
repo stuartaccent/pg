@@ -34,10 +34,11 @@ var static embed.FS
 // Server holds one query session per tab and the tree's catalog, all for the
 // connected service, plus the backup or sandbox job in progress.
 type Server struct {
-	// ChooseExport asks where to save an export, starting from name, and
-	// returns "" if cancelled. Set it before serving. Without it, as in a
-	// browser, exports go to ~/Downloads.
-	ChooseExport func(name string) (string, error)
+	// ChooseFile asks where to save a file, offering name in dir, or wherever
+	// was last used if dir is "". It returns "" if cancelled, and is set before
+	// serving. Without it, as in a browser, exports go to ~/Downloads and
+	// queries are named in a dialog of the page's own.
+	ChooseFile func(dir, name string) (string, error)
 
 	mu       sync.Mutex
 	service  string                                        // guarded by mu
@@ -88,6 +89,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /completions", s.completions)
 	mux.HandleFunc("GET /queries", s.queries)
 	mux.HandleFunc("POST /queries", s.saveQuery)
+	mux.HandleFunc("POST /queries/choose", s.chooseQuery)
 	mux.HandleFunc("POST /queries/open", s.openQueries)
 	mux.HandleFunc("GET /queries/{name...}", s.readQuery)
 	mux.HandleFunc("GET /activity", s.activity)
@@ -379,8 +381,8 @@ func (s *Server) chooseExport(w http.ResponseWriter, r *http.Request) {
 		render(w, r, ExportStatus("", 0, errors.New("connect to a service first")))
 		return
 	}
-	if s.ChooseExport != nil {
-		path, err := s.ChooseExport("export.csv")
+	if s.ChooseFile != nil {
+		path, err := s.ChooseFile("", "export.csv")
 		if err != nil {
 			render(w, r, ExportStatus("", 0, err))
 			return
@@ -407,7 +409,7 @@ func (s *Server) export(w http.ResponseWriter, r *http.Request) {
 		render(w, r, ExportStatus("", 0, errors.New("connect to a service first")))
 		return
 	}
-	if s.ChooseExport != nil && chosen == "" {
+	if s.ChooseFile != nil && chosen == "" {
 		render(w, r, ExportStatus("", 0, errors.New("choose where to save first")))
 		return
 	}

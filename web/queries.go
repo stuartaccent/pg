@@ -3,6 +3,7 @@ package web
 import (
 	"embed"
 	"errors"
+	"io"
 	"io/fs"
 	"net/http"
 	"os"
@@ -136,6 +137,56 @@ func (s *Server) saveQuery(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("HX-Trigger", "query-saved")
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// chooseQuery saves a query where the Save dialog says, offering the query the
+// tab came from. It answers with the query's name, or its path if it's been put
+// outside the folder. 501 tells the page there's no dialog here.
+func (s *Server) chooseQuery(w http.ResponseWriter, r *http.Request) {
+	if s.ChooseFile == nil {
+		http.Error(w, "no save dialog", http.StatusNotImplemented)
+		return
+	}
+	text := r.FormValue("text")
+	if strings.TrimSpace(text) == "" {
+		http.Error(w, "there's nothing in this tab to save", http.StatusBadRequest)
+		return
+	}
+	root, err := queryDir()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	dir, file := root, "Untitled.sql"
+	if path, err := queryPath(r.FormValue("name")); err == nil {
+		dir, file = filepath.Split(path)
+	}
+	path, err := s.ChooseFile(dir, file)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if path == "" {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	// The dialog only asked about replacing the name it was given, so one that
+	// gains its extension here mustn't replace anything.
+	asked := strings.HasSuffix(path, ".sql")
+	if !asked {
+		path += ".sql"
+	}
+	if err := writeQuery(path, text, asked); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	name := strings.TrimSuffix(path, ".sql")
+	if inside, ok := strings.CutPrefix(name, root+"/"); ok {
+		name = inside
+	} else {
+		name = path
+	}
+	_, _ = io.WriteString(w, name)
 }
 
 func writeQuery(path, text string, overwrite bool) error {

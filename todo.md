@@ -85,6 +85,7 @@ Built along the way, outside the lists above.
 - [x] Ask before quitting while a job is running.
 - [x] Minimum window size, and a background matching the theme while loading.
 - [x] Choose where an export goes with a native Save dialog.
+- [x] Save queries with the same dialog, offering the query the tab came from.
 
 ### Tree
 
