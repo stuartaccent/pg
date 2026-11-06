@@ -138,8 +138,8 @@ func TestBackupThenSandbox(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer Remove(ctx, sb.Name)
-	if ignored != 0 {
-		t.Errorf("ignored = %d", ignored)
+	if ignored.Count != 0 {
+		t.Errorf("ignored = %+v", ignored)
 	}
 
 	found, err := Sandboxes(ctx)

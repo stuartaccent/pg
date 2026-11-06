@@ -265,13 +265,13 @@ func (s *Server) newSandbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.startAndRender(w, r, "Opening sandbox", func(ctx context.Context, progress func(string)) (jobResult, error) {
-		sb, ignored, err := dockerpg.NewSandbox(ctx, dockerpg.ImageForBackup(name), path, progress)
+		sb, skipped, err := dockerpg.NewSandbox(ctx, dockerpg.ImageForBackup(name), path, progress)
 		if err != nil {
 			return jobResult{}, err
 		}
 		text := sb.Name + " is ready."
-		if ignored > 0 {
-			text += fmt.Sprintf(" The restore skipped %d errors.", ignored)
+		if skipped.Count > 0 {
+			text += fmt.Sprintf(" The restore skipped %d errors.", skipped.Count)
 		}
 		return jobResult{Text: text, Connect: sb.Name}, nil
 	})
@@ -311,8 +311,9 @@ func (s *Server) verifyBackup(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) restoreBackup(w http.ResponseWriter, r *http.Request) {
-	name, database := r.FormValue("file"), r.FormValue("database")
+// writableTarget returns a backup's path, and the connected server to write it
+// to, if that's allowed.
+func (s *Server) writableTarget(name string) (string, string, dockerpg.Target, error) {
 	path, err := backupPath(name)
 	s.mu.Lock()
 	service, readOnly := s.service, s.readOnly
@@ -324,7 +325,14 @@ func (s *Server) restoreBackup(w http.ResponseWriter, r *http.Request) {
 		err = errors.New("connect to a service first")
 	case readOnly:
 		err = errors.New(service + " is read-only")
-	case !dockerpg.ValidDatabase(database):
+	}
+	return path, service, target, err
+}
+
+func (s *Server) restoreBackup(w http.ResponseWriter, r *http.Request) {
+	database := r.FormValue("database")
+	path, service, target, err := s.writableTarget(r.FormValue("file"))
+	if err == nil && !dockerpg.ValidDatabase(database) {
 		err = errors.New("not a usable database name: " + database)
 	}
 	if err != nil {
@@ -347,18 +355,10 @@ func (s *Server) restoreBackup(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) replaceBackup(w http.ResponseWriter, r *http.Request) {
-	name := r.FormValue("file")
-	path, err := backupPath(name)
-	s.mu.Lock()
-	service, readOnly, database := s.service, s.readOnly, s.settings.Database
-	target := dockerpg.Target{DSN: s.dsn, Settings: s.settings, Image: s.image}
-	s.mu.Unlock()
+	path, _, target, err := s.writableTarget(r.FormValue("file"))
+	database := target.Settings.Database
 	switch {
 	case err != nil:
-	case service == "":
-		err = errors.New("connect to a service first")
-	case readOnly:
-		err = errors.New(service + " is read-only")
 	case dockerpg.CanReplace(database) != "":
 		err = errors.New(dockerpg.CanReplace(database))
 	case r.FormValue("confirm") != database:

@@ -228,26 +228,53 @@ func Remove(ctx context.Context, name string) error {
 
 var ignoredErrors = regexp.MustCompile(`errors ignored on restore: (\d+)`)
 
-// NewSandbox starts a sandbox and restores backup into it, returning how many
-// errors the restore skipped over. A few are normal for a real database, such
-// as roles that exist on the source server and not here.
+// Skipped is what a restore got past. A few are normal for a real database,
+// such as roles that exist on the source server and not here.
+type Skipped struct {
+	Count int
+	First string // the first error, if it could be picked out
+}
+
+var serverError = regexp.MustCompile(`ERROR:\s+(.+)`)
+
+// runRestore runs a pg_restore, which exits non-zero for skipped errors as well
+// as real failures. It counts the skipped ones for us, which tells them apart.
+func runRestore(ctx context.Context, cmd *exec.Cmd, progress func(string)) (Skipped, error) {
+	var skipped Skipped
+	last, err := run(cmd, func(line string) {
+		if m := ignoredErrors.FindStringSubmatch(line); m != nil {
+			skipped.Count, _ = strconv.Atoi(m[1])
+		}
+		if m := serverError.FindStringSubmatch(line); m != nil && skipped.First == "" {
+			skipped.First = m[1]
+		}
+		progress(line)
+	})
+	if err != nil && (skipped.Count == 0 || ctx.Err() != nil) {
+		return skipped, fmt.Errorf("restore failed: %w: %s", err, strings.Join(last, " "))
+	}
+	return skipped, nil
+}
+
+// NewSandbox starts a sandbox and restores backup into it, returning what the
+// restore skipped over.
 //
 // The port is on 127.0.0.1 only, and has a random password, as it holds a copy
 // of real data.
-func NewSandbox(ctx context.Context, image, backup string, progress func(string)) (Sandbox, int, error) {
+func NewSandbox(ctx context.Context, image, backup string, progress func(string)) (Sandbox, Skipped, error) {
 	f, err := os.Open(backup)
 	if err != nil {
-		return Sandbox{}, 0, err
+		return Sandbox{}, Skipped{}, err
 	}
 	defer f.Close()
 
 	id := make([]byte, 4)
 	password := make([]byte, 16)
 	if _, err := rand.Read(id); err != nil {
-		return Sandbox{}, 0, err
+		return Sandbox{}, Skipped{}, err
 	}
 	if _, err := rand.Read(password); err != nil {
-		return Sandbox{}, 0, err
+		return Sandbox{}, Skipped{}, err
 	}
 	sb := Sandbox{
 		Name:     sandboxPrefix + hex.EncodeToString(id),
@@ -262,7 +289,7 @@ func NewSandbox(ctx context.Context, image, backup string, progress func(string)
 		"-e", "POSTGRES_PASSWORD", "-e", "POSTGRES_DB",
 		"--publish", "127.0.0.1::5432", image)
 	if last, err := run(start, progress); err != nil {
-		return Sandbox{}, 0, fmt.Errorf("starting the sandbox: %w: %s", err, strings.Join(last, " "))
+		return Sandbox{}, Skipped{}, fmt.Errorf("starting the sandbox: %w: %s", err, strings.Join(last, " "))
 	}
 
 	// A sandbox that didn't finish isn't one anyone should be left with. It's
@@ -276,7 +303,7 @@ func NewSandbox(ctx context.Context, image, backup string, progress func(string)
 	progress("Waiting for Postgres to start")
 	if err := waitUntilReady(ctx, sb.Name); err != nil {
 		discard()
-		return Sandbox{}, 0, err
+		return Sandbox{}, Skipped{}, err
 	}
 	out, err := output(ctx, nil, "port", sb.Name, "5432/tcp")
 	if err == nil {
@@ -284,26 +311,19 @@ func NewSandbox(ctx context.Context, image, backup string, progress func(string)
 	}
 	if err != nil {
 		discard()
-		return Sandbox{}, 0, err
+		return Sandbox{}, Skipped{}, err
 	}
 
 	progress("Restoring " + sb.Source)
 	restore := command(ctx, nil, "exec", "--interactive", sb.Name,
 		"pg_restore", "--no-owner", "--no-privileges", "--verbose", "--username=postgres", "--dbname="+sandboxDB)
 	restore.Stdin = f
-	var ignored int
-	last, err := run(restore, func(line string) {
-		if m := ignoredErrors.FindStringSubmatch(line); m != nil {
-			ignored, _ = strconv.Atoi(m[1])
-		}
-		progress(line)
-	})
-	// pg_restore exits non-zero for skipped errors too, which it counts for us.
-	if err != nil && (ignored == 0 || ctx.Err() != nil) {
+	skipped, err := runRestore(ctx, restore, progress)
+	if err != nil {
 		discard()
-		return Sandbox{}, 0, fmt.Errorf("restore failed: %w: %s", err, strings.Join(last, " "))
+		return Sandbox{}, Skipped{}, err
 	}
-	return sb, ignored, nil
+	return sb, skipped, nil
 }
 
 // portOf reads a port from docker port's output, such as "127.0.0.1:55012".

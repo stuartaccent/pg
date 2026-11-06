@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"regexp"
 	"slices"
 	"strconv"
@@ -65,7 +66,7 @@ func countListedTables(list string) int {
 // checks every table it lists arrived and counts their rows. The sandbox never
 // outlives this, whatever happens.
 func Verify(ctx context.Context, image, backup string, progress func(string)) (Report, error) {
-	sb, ignored, err := NewSandbox(ctx, image, backup, progress)
+	sb, skipped, err := NewSandbox(ctx, image, backup, progress)
 	if err != nil {
 		return Report{}, err
 	}
@@ -74,22 +75,26 @@ func Verify(ctx context.Context, image, backup string, progress func(string)) (R
 		defer cancel()
 		_ = Remove(cleanup, sb.Name)
 	}()
+	list := command(ctx, nil, "exec", "--interactive", sb.Name, "pg_restore", "--list")
+	return readBack(ctx, list, backup, sb.DSN(), skipped, progress)
+}
 
+// readBack reports what a restore left in dsn. list is a pg_restore --list,
+// given the backup to read the table of contents from.
+func readBack(ctx context.Context, list *exec.Cmd, backup, dsn string, skipped Skipped, progress func(string)) (Report, error) {
 	f, err := os.Open(backup)
 	if err != nil {
 		return Report{}, err
 	}
 	defer f.Close()
-	progress("Reading the backup's table of contents")
-	var list, stderr bytes.Buffer
-	cmd := command(ctx, nil, "exec", "--interactive", sb.Name, "pg_restore", "--list")
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = f, &list, &stderr
-	if err := cmd.Run(); err != nil {
+	progress("Checking what arrived")
+	var contents, stderr bytes.Buffer
+	list.Stdin, list.Stdout, list.Stderr = f, &contents, &stderr
+	if err := list.Run(); err != nil {
 		return Report{}, fmt.Errorf("reading the backup: %w: %s", err, strings.TrimSpace(stderr.String()))
 	}
 
-	progress("Counting rows")
-	c, err := conn.Open(ctx, sb.DSN())
+	c, err := conn.Open(ctx, dsn)
 	if err != nil {
 		return Report{}, err
 	}
@@ -98,7 +103,7 @@ func Verify(ctx context.Context, image, backup string, progress func(string)) (R
 	if err != nil {
 		return Report{}, err
 	}
-	return Report{ListedTables: countListedTables(list.String()), Counts: counts, Ignored: ignored}, nil
+	return Report{ListedTables: countListedTables(contents.String()), Counts: counts, Ignored: skipped.Count, FirstError: skipped.First}, nil
 }
 
 // TableCounts returns the exact rows in every table, by schema-qualified name.

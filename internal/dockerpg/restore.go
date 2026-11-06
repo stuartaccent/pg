@@ -1,7 +1,6 @@
 package dockerpg
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -23,8 +22,6 @@ type Target struct {
 	Settings conn.Settings
 	Image    string // the image matching the server
 }
-
-var serverError = regexp.MustCompile(`ERROR:\s+(.+)`)
 
 var validDatabase = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,62}$`)
 
@@ -153,41 +150,10 @@ func fill(ctx context.Context, t Target, image, backup, database string, keepOwn
 	}
 	restore := command(ctx, env, args...)
 	restore.Stdin = f
-	var ignored int
-	var firstError string
-	last, err := run(restore, func(line string) {
-		if m := ignoredErrors.FindStringSubmatch(line); m != nil {
-			ignored, _ = strconv.Atoi(m[1])
-		}
-		if m := serverError.FindStringSubmatch(line); m != nil && firstError == "" {
-			firstError = m[1]
-		}
-		progress(line)
-	})
-	// pg_restore exits non-zero for skipped errors too, which it counts for us.
-	if err != nil && (ignored == 0 || ctx.Err() != nil) {
-		return Report{}, fmt.Errorf("restore failed: %w: %s", err, strings.Join(last, " "))
-	}
-
-	if _, err := f.Seek(0, 0); err != nil {
-		return Report{}, err
-	}
-	progress("Checking what arrived")
-	var list, stderr bytes.Buffer
-	toc := command(ctx, nil, "run", "--rm", "--init", "--interactive", image, "pg_restore", "--list")
-	toc.Stdin, toc.Stdout, toc.Stderr = f, &list, &stderr
-	if err := toc.Run(); err != nil {
-		return Report{}, fmt.Errorf("reading the backup: %w: %s", err, strings.TrimSpace(stderr.String()))
-	}
-
-	c, err := conn.Open(ctx, conn.WithDatabase(t.DSN, database))
+	skipped, err := runRestore(ctx, restore, progress)
 	if err != nil {
 		return Report{}, err
 	}
-	defer c.Close(context.WithoutCancel(ctx))
-	counts, err := TableCounts(ctx, c)
-	if err != nil {
-		return Report{}, err
-	}
-	return Report{ListedTables: countListedTables(list.String()), Counts: counts, Ignored: ignored, FirstError: firstError}, nil
+	list := command(ctx, nil, "run", "--rm", "--init", "--interactive", image, "pg_restore", "--list")
+	return readBack(ctx, list, backup, conn.WithDatabase(t.DSN, database), skipped, progress)
 }
