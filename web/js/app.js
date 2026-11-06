@@ -134,7 +134,7 @@ async function closeAllTabs() {
 	setText(views.get(kept), "");
 	tabQueries.delete(kept);
 	document.querySelector(`#results-${kept}`).replaceChildren();
-	document.querySelector(`#notice-${kept}`).replaceChildren();
+	document.querySelector("#notice").replaceChildren();
 	selectTab(kept);
 	saveTabs();
 }
@@ -202,7 +202,7 @@ function sqlToRun(elt) {
 
 function formatSQL() {
 	const view = views.get(activeTab);
-	const notice = document.querySelector(`#notice-${activeTab}`);
+	const notice = document.querySelector("#notice");
 	notice.textContent = "";
 	try {
 		setText(view, formatDialect(view.state.doc.toString(), { dialect: postgresql, keywordCase: "lower" }));
@@ -259,7 +259,7 @@ async function saveQuery() {
 	}
 	if (res.status === 204) return;
 	const answer = (await res.text()).trim();
-	document.querySelector(`#notice-${tab}`).textContent = res.ok ? `Saved ${answer}` : answer;
+	document.querySelector("#notice").textContent = res.ok ? `Saved ${answer}` : answer;
 	if (res.ok) {
 		// Somewhere outside the folder isn't a name it can be offered under.
 		if (answer.startsWith("/")) tabQueries.delete(tab);
@@ -278,7 +278,7 @@ document.addEventListener("query-saved", () => {
 	document.querySelector("#save-query").close();
 	const name = document.querySelector("#save-name").value.trim().replace(/\.sql$/, "");
 	tabQueries.set(activeTab, name);
-	document.querySelector(`#notice-${activeTab}`).textContent = `Saved ${name}`;
+	document.querySelector("#notice").textContent = `Saved ${name}`;
 });
 
 async function showActivity() {
