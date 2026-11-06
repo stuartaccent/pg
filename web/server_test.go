@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -94,6 +95,144 @@ func TestActivityButtons(t *testing.T) {
 	}
 	if strings.Contains(readOnly.String(), "/activity/") {
 		t.Error("read-only should have no buttons")
+	}
+}
+
+func postForm(s *Server, path string, form url.Values) *httptest.ResponseRecorder {
+	r := httptest.NewRequest(http.MethodPost, path, strings.NewReader(form.Encode()))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, r)
+	return w
+}
+
+func TestStartersOnlyArriveOnce(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	s := New()
+	body := get(t, s, http.MethodGet, "/queries").Body.String()
+	for _, want := range []string{"Create role", "Table sizes", "Unused indexes", "Cache hit rate", "Long-running queries"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("%q not listed", want)
+		}
+	}
+	if err := os.Remove(filepath.Join(home, "pg-queries", "Table sizes.sql")); err != nil {
+		t.Fatal(err)
+	}
+	if body := get(t, s, http.MethodGet, "/queries").Body.String(); strings.Contains(body, "Table sizes") {
+		t.Error("a deleted starter came back")
+	}
+}
+
+func TestSaveAndReadQuery(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	s := New()
+	save := func(name, text, overwrite string) *httptest.ResponseRecorder {
+		return postForm(s, "/queries", url.Values{"name": {name}, "text": {text}, "overwrite": {overwrite}})
+	}
+	read := func() string { return get(t, s, http.MethodGet, "/queries/My%20100%25%20query").Body.String() }
+
+	w := save(" My 100% query.sql ", "select 1", "")
+	if w.Code != http.StatusNoContent || w.Header().Get("HX-Trigger") != "query-saved" {
+		t.Fatalf("save = %d %q", w.Code, w.Body)
+	}
+	if got := read(); got != "select 1" {
+		t.Errorf("read = %q", got)
+	}
+
+	// A taken name asks first, and keeps what's there until told otherwise.
+	if w := save("My 100% query", "select 2", ""); !strings.Contains(w.Body.String(), "Overwrite") || w.Header().Get("HX-Trigger") != "" {
+		t.Errorf("taken name = %q", w.Body)
+	}
+	if got := read(); got != "select 1" {
+		t.Errorf("after refusal = %q", got)
+	}
+	save("My 100% query", "select 2", "1")
+	if got := read(); got != "select 2" {
+		t.Errorf("after overwrite = %q", got)
+	}
+
+	if w := save("empty", "  ", ""); !strings.Contains(w.Body.String(), "nothing") {
+		t.Errorf("empty tab = %q", w.Body)
+	}
+	if body := get(t, s, http.MethodGet, "/queries").Body.String(); !strings.Contains(body, `data-url="/queries/My%20100%25%20query"`) {
+		t.Errorf("list = %q", body)
+	}
+}
+
+func TestQueriesStayInTheFolder(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	s := New()
+	for _, name := range []string{"", "../escape", "a/b", ".hidden", ".."} {
+		w := postForm(s, "/queries", url.Values{"name": {name}, "text": {"select 1"}})
+		if !strings.Contains(w.Body.String(), "slash") {
+			t.Errorf("save %q = %d %q", name, w.Code, w.Body)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(home, "escape.sql")); err == nil {
+		t.Error("wrote outside the folder")
+	}
+	if err := os.WriteFile(filepath.Join(home, "secret.sql"), []byte("secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if body := get(t, s, http.MethodGet, "/queries/..%2Fsecret").Body.String(); strings.Contains(body, "secret\n") || body == "secret" {
+		t.Errorf("read outside the folder: %q", body)
+	}
+}
+
+func TestOpenQueriesFolder(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	var opened string
+	real := openFolder
+	openFolder = func(path string) error {
+		opened = path
+		return nil
+	}
+	t.Cleanup(func() { openFolder = real })
+	if got := get(t, New(), http.MethodPost, "/queries/open").Code; got != http.StatusNoContent {
+		t.Errorf("status = %d", got)
+	}
+	if want := filepath.Join(home, "pg-queries"); opened != want {
+		t.Errorf("opened %q, want %q", opened, want)
+	}
+}
+
+// Everything runs in a transaction that's rolled back, so a starter that
+// changes something leaves no trace.
+func TestStartersRun(t *testing.T) {
+	service := os.Getenv("PGIDE_TEST_SERVICE")
+	if service == "" {
+		t.Skip("PGIDE_TEST_SERVICE not set")
+	}
+	ctx := context.Background()
+	c, err := conn.Open(ctx, conn.ServiceDSN(service))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.Close(ctx) })
+	res, err := c.Exec(ctx, "select current_database()").ReadAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	database := string(res[0].Rows[0][0])
+	files, err := fs.Glob(starters, "starters/*.sql")
+	if err != nil || len(files) == 0 {
+		t.Fatalf("starters: %v, %v", files, err)
+	}
+	for _, file := range files {
+		text, err := starters.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sql := strings.ReplaceAll(string(text), "on database mydb", `on database "`+database+`"`)
+		_, err = c.Exec(ctx, "begin; "+sql+"; rollback").ReadAll()
+		if err != nil {
+			t.Errorf("%s: %v", file, err)
+			_, _ = c.Exec(ctx, "rollback").ReadAll()
+		}
 	}
 }
 
