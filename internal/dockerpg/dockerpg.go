@@ -61,13 +61,17 @@ func ImageForBackup(name string) string {
 	return "postgres:latest"
 }
 
-// dockerPath finds docker, including where it lands on a Mac, as an app opened
-// from the Finder doesn't get the shell's PATH.
+// dockerDirs are where Docker lands on a Mac. An app opened from the Finder
+// doesn't get the shell's PATH, so these have to be added.
+const dockerDirs = "/usr/local/bin:/opt/homebrew/bin"
+
+// dockerPath finds docker, including in dockerDirs.
 func dockerPath() string {
 	if path, err := exec.LookPath("docker"); err == nil {
 		return path
 	}
-	for _, path := range []string{"/usr/local/bin/docker", "/opt/homebrew/bin/docker"} {
+	for dir := range strings.SplitSeq(dockerDirs, ":") {
+		path := filepath.Join(dir, "docker")
 		if _, err := os.Stat(path); err == nil {
 			return path
 		}
@@ -80,7 +84,8 @@ func dockerPath() string {
 // container running.
 func command(ctx context.Context, env []string, args ...string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, dockerPath(), args...)
-	cmd.Env = append(os.Environ(), env...)
+	// docker runs its credential helper from the PATH, so finding docker isn't enough.
+	cmd.Env = append(append(os.Environ(), "PATH="+os.Getenv("PATH")+":"+dockerDirs), env...)
 	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
 	cmd.WaitDelay = 10 * time.Second
 	return cmd

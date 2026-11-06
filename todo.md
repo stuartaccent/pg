@@ -76,6 +76,7 @@ Built along the way, outside the lists above.
 - [x] Drag bars to resize the editor and sidebar, with arrow keys too.
 - [x] Close all tabs.
 - [x] App icon in Menlo Bold on the dark theme's colours, with a matching favicon.
+- [x] A proper `.app` bundle, built with `scripts/bundle.sh`.
 - [x] Tidy the Backups dialog: lists line up with the title, no row hover, no focus ring on opening.
 
 ### Tree
@@ -110,9 +111,3 @@ Built along the way, outside the lists above.
 ### Fixes
 
 - [x] Stop WebKit reusing responses, which left the tree empty in the desktop app.
-
-## Ideas
-
-Talked about but not built.
-
-- [ ] A proper `.app` bundle, so the Dock label says `pg` and the generic tile doesn't flash at launch.
