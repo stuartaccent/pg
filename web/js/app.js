@@ -222,6 +222,16 @@ async function showBackups() {
 	showUnfocused(document.querySelector("#backups"));
 }
 
+async function showActivity() {
+	await htmx.ajax("GET", "/activity", { target: "#activity-body" });
+	showUnfocused(document.querySelector("#activity"));
+}
+
+// Whether the list can refresh. Not under another dialog: replacing the row
+// behind a confirm would lose its Terminate. Nor while text is being selected.
+const activityLive = () =>
+	document.querySelector("#activity").open && document.querySelectorAll("dialog[open]").length === 1 && getSelection().isCollapsed;
+
 function showRestore(button) {
 	const { file, name, service } = button.dataset;
 	document.querySelector("#restore-backup").textContent = file;
@@ -409,11 +419,11 @@ document.addEventListener("keydown", (event) => {
 	resize(bar, sizeOf(bar) + step);
 });
 
-Object.assign(window, { selectTab, closeTab, closeAllTabs, useSQL, useDefinition, resetTree, formatSQL, showHistory, showBackups, showRestore, closeRestore, showReplace, checkReplace, closeReplace, renderHistory, copyCell });
+Object.assign(window, { selectTab, closeTab, closeAllTabs, useSQL, useDefinition, resetTree, formatSQL, showHistory, showActivity, activityLive, showBackups, showRestore, closeRestore, showReplace, checkReplace, closeReplace, renderHistory, copyCell });
 
 document.addEventListener("click", (event) => {
 	const td = event.target.closest?.(".results tr[data-row] td");
-	if (td && getSelection().isCollapsed) showCell(td);
+	if (td && !event.target.closest("button") && getSelection().isCollapsed) showCell(td);
 });
 
 // Sends the selection rather than the whole editor, and remembers what ran.

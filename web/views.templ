@@ -44,6 +44,7 @@ templ Index(services []string, current string, readOnly bool, j jobView, err err
 				<span id="job" class="min-w-0 max-w-md">
 					@JobStatus(j)
 				</span>
+				<button type="button" class="btn btn-ghost btn-sm" onclick="showActivity()">Activity</button>
 				<button type="button" class="btn btn-ghost btn-sm" onclick="showBackups()">Backups</button>
 				<details class="dropdown dropdown-end">
 					<summary class="btn btn-ghost btn-sm">Config</summary>
@@ -100,6 +101,16 @@ templ Index(services []string, current string, readOnly bool, j jobView, err err
 			</dialog>
 			<dialog id="backups" class="modal">
 				<div id="backups-body" class="modal-box max-w-4xl"></div>
+				<form method="dialog" class="modal-backdrop"><button aria-label="Close">close</button></form>
+			</dialog>
+			<dialog id="activity" class="modal">
+				<div class="modal-box max-w-6xl">
+					<h3 class="font-medium">Activity</h3>
+					<!-- The scrolling is out here so that refreshing keeps its place. -->
+					<div class="results mt-2 max-h-[60vh] overflow-auto">
+						<div id="activity-body" hx-get="/activity" hx-trigger="every 2s [activityLive()]"></div>
+					</div>
+				</div>
 				<form method="dialog" class="modal-backdrop"><button aria-label="Close">close</button></form>
 			</dialog>
 			<dialog id="restore" class="modal">
@@ -304,6 +315,56 @@ templ BackupsBody(service, database string, canRestore bool, dir string, files [
 				</li>
 			}
 		</ul>
+	}
+}
+
+// ActivityBody is the Activity dialog's content.
+templ ActivityBody(backends []catalog.Backend, canStop bool, err error) {
+	if err != nil {
+		<p class="text-error whitespace-pre-wrap mb-2">{ err.Error() }</p>
+	}
+	if len(backends) > 0 {
+		<table class="table table-sm table-pin-rows font-mono text-xs">
+			<thead>
+				<tr>
+					<th>PID</th>
+					<th>User</th>
+					<th>Database</th>
+					<th>App</th>
+					<th>State</th>
+					<th>For</th>
+					<th>Blocked by</th>
+					<th>Query</th>
+					if canStop {
+						<th></th>
+					}
+				</tr>
+			</thead>
+			<tbody>
+				for _, b := range backends {
+					<tr data-row class={ templ.KV("text-warning", b.BlockedBy != "") }>
+						<td>{ fmt.Sprint(b.PID) }</td>
+						<td>{ b.User }</td>
+						<td>{ b.Database }</td>
+						<td>{ b.App }</td>
+						<td>{ b.State }</td>
+						<td>{ b.For }</td>
+						<td>{ b.BlockedBy }</td>
+						<td>{ b.Query }</td>
+						if canStop {
+							<td class="text-right">
+								if b.State == "active" {
+									<button type="button" class="btn btn-soft btn-xs" hx-post={ fmt.Sprintf("/activity/%d/cancel", b.PID) } hx-target="#activity-body">Cancel</button>
+								}
+								<button type="button" class="btn btn-soft btn-error btn-xs ml-1" hx-post={ fmt.Sprintf("/activity/%d/terminate", b.PID) } hx-target="#activity-body" data-confirm={ fmt.Sprintf("End connection %d of %s to %s? Anything it has open is rolled back.", b.PID, b.User, b.Database) }>Terminate</button>
+							</td>
+						}
+					</tr>
+				}
+			</tbody>
+		</table>
+	} else if err == nil {
+		<p class="text-base-content/50">Nothing else is connected.</p>
 	}
 }
 
