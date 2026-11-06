@@ -1,7 +1,9 @@
 package web
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"net/url"
 	"slices"
 	"strings"
@@ -102,6 +104,23 @@ templ Index(services []string, current string, readOnly bool, j jobView, err err
 			<dialog id="backups" class="modal">
 				<div id="backups-body" class="modal-box max-w-4xl"></div>
 				<form method="dialog" class="modal-backdrop"><button aria-label="Close">close</button></form>
+			</dialog>
+			<dialog id="queries" class="modal">
+				<div id="queries-body" class="modal-box max-w-4xl"></div>
+				<form method="dialog" class="modal-backdrop"><button aria-label="Close">close</button></form>
+			</dialog>
+			<dialog id="save-query" class="modal">
+				<form class="modal-box" hx-post="/queries" hx-target="#save-status">
+					<h3 class="text-base font-medium">Save query</h3>
+					<label for="save-name" class="block text-xs text-base-content/50 mt-4 mb-1">Name</label>
+					<input id="save-name" name="name" class="input input-sm w-full focus:outline-1 focus:outline-offset-0" required maxlength="200" autocomplete="off" spellcheck="false"/>
+					<input id="save-text" type="hidden" name="text"/>
+					<div id="save-status" class="mt-2"></div>
+					<div class="modal-action">
+						<button type="button" class="btn btn-soft btn-sm" onclick="document.querySelector('#save-query').close()">Cancel</button>
+						<button type="submit" class="btn btn-primary btn-sm">Save</button>
+					</div>
+				</form>
 			</dialog>
 			<dialog id="activity" class="modal">
 				<div class="modal-box max-w-6xl">
@@ -205,6 +224,8 @@ templ tabPanel(id string) {
 			<button type="button" class="btn btn-ghost btn-sm" onclick="formatSQL()">Format</button>
 			<button type="button" class="btn btn-ghost btn-sm" hx-post="/export" hx-include={ "#editor-" + id } hx-target={ "#notice-" + id } hx-indicator={ "#running-" + id }>Export CSV</button>
 			<button type="button" class="btn btn-ghost btn-sm" onclick="showHistory()">History</button>
+			<button type="button" class="btn btn-ghost btn-sm" onclick="showQueries()">Queries</button>
+			<button type="button" class="btn btn-ghost btn-sm" onclick="showSaveQuery()">Save</button>
 			<span id={ "running-" + id } class="htmx-indicator flex items-center gap-1 text-base-content/60">
 				<span class="loading loading-spinner loading-xs"></span>
 				Running… <span class="timer tabular-nums"></span>
@@ -315,6 +336,38 @@ templ BackupsBody(service, database string, canRestore bool, dir string, files [
 				</li>
 			}
 		</ul>
+	}
+}
+
+// QueriesBody is the Queries dialog's content.
+templ QueriesBody(dir string, names []string, err error) {
+	<h3 class="font-medium">Saved queries</h3>
+	if err != nil {
+		<p class="text-error whitespace-pre-wrap mt-2">{ err.Error() }</p>
+	}
+	<button type="button" class="link link-hover text-base-content/60 text-xs mt-1 cursor-pointer" title="Open in Finder. Anything ending .sql here is listed." hx-post="/queries/open" hx-target="#queries-body">{ dir }</button>
+	<ul class="mt-2 max-h-[60vh] overflow-auto">
+		if len(names) == 0 {
+			<li class="text-base-content/50 text-sm py-1">No saved queries yet.</li>
+		}
+		for _, name := range names {
+			<li>
+				<button type="button" class="text-left truncate w-full py-1 cursor-pointer hover:underline" title={ name } data-url={ "/queries/" + url.PathEscape(name) } onclick="document.querySelector('#queries').close(); useDefinition(event, this)">{ name }</button>
+			</li>
+		}
+	</ul>
+}
+
+// SaveStatus says why a query wasn't saved, offering to replace one of the
+// same name. The button isn't a submit, so that Enter can't overwrite.
+templ SaveStatus(err error) {
+	if errors.Is(err, fs.ErrExist) {
+		<div class="flex items-center gap-2">
+			<span class="text-warning text-xs flex-1">There's already a query with that name.</span>
+			<button type="button" class="btn btn-soft btn-warning btn-xs" hx-post="/queries" hx-include="closest form" hx-vals='{"overwrite":"1"}' hx-target="#save-status">Overwrite</button>
+		</div>
+	} else {
+		<p class="text-error text-xs">{ err.Error() }</p>
 	}
 }
 

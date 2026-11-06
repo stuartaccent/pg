@@ -222,6 +222,23 @@ async function showBackups() {
 	showUnfocused(document.querySelector("#backups"));
 }
 
+async function showQueries() {
+	await htmx.ajax("GET", "/queries", { target: "#queries-body" });
+	showUnfocused(document.querySelector("#queries"));
+}
+
+function showSaveQuery() {
+	document.querySelector("#save-name").value = "";
+	document.querySelector("#save-text").value = views.get(activeTab).state.doc.toString();
+	document.querySelector("#save-status").replaceChildren();
+	document.querySelector("#save-query").showModal();
+}
+
+document.addEventListener("query-saved", () => {
+	document.querySelector("#save-query").close();
+	document.querySelector(`#notice-${activeTab}`).textContent = `Saved ${document.querySelector("#save-name").value.trim()}`;
+});
+
 async function showActivity() {
 	await htmx.ajax("GET", "/activity", { target: "#activity-body" });
 	showUnfocused(document.querySelector("#activity"));
@@ -419,7 +436,7 @@ document.addEventListener("keydown", (event) => {
 	resize(bar, sizeOf(bar) + step);
 });
 
-Object.assign(window, { selectTab, closeTab, closeAllTabs, useSQL, useDefinition, resetTree, formatSQL, showHistory, showActivity, activityLive, showBackups, showRestore, closeRestore, showReplace, checkReplace, closeReplace, renderHistory, copyCell });
+Object.assign(window, { selectTab, closeTab, closeAllTabs, useSQL, useDefinition, resetTree, formatSQL, showHistory, showQueries, showSaveQuery, showActivity, activityLive, showBackups, showRestore, closeRestore, showReplace, checkReplace, closeReplace, renderHistory, copyCell });
 
 document.addEventListener("click", (event) => {
 	const td = event.target.closest?.(".results tr[data-row] td");

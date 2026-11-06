@@ -95,6 +95,10 @@ Built along the way, outside the lists above.
 - [x] Activity dialog: every connection on the server, refreshing every 2 seconds, showing what's blocking what, with Cancel and Terminate.
 - [x] Roles in the tree: memberships, grants in this database, and a definition without the password.
 
+### Saved queries
+
+- [x] Saved queries as `.sql` files in `~/pg-queries`, opened in a tab without running, with starters for roles and stats.
+
 ### Connections
 
 - [x] Config menu to open the service and password files in a text editor.
