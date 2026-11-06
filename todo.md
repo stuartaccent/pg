@@ -102,6 +102,8 @@ Built along the way, outside the lists above.
 - [x] Back up through Docker, using the image matching the server.
 - [x] Sandboxes: restore a backup into a throwaway container and connect to it, with a badge to show it's not the real thing.
 - [x] Link to open the backups folder in Finder.
+- [x] Verify a backup: restore it into a throwaway container, check every table arrived, and compare row counts.
+- [x] Delete backups from the Backups dialog, for good rather than to the Trash.
 
 ### Fixes
 
@@ -111,7 +113,5 @@ Built along the way, outside the lists above.
 
 Talked about but not built.
 
-- [x] Verify a backup: restore it into a throwaway container and compare table and row counts.
 - [ ] Restore a backup, into a new database by default. Overwriting should mean typing the database's name, and be refused on read-only services.
-- [ ] Delete backups from the Backups dialog.
 - [ ] A proper `.app` bundle, so the Dock label says `pg` and the generic tile doesn't flash at launch.

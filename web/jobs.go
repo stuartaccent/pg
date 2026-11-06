@@ -229,6 +229,16 @@ func backupPath(name string) (string, error) {
 	return path, err
 }
 
+// deleteBackup removes a backup for good, rather than to the Trash, as these can
+// hold sensitive data. The page asks first.
+func (s *Server) deleteBackup(w http.ResponseWriter, r *http.Request) {
+	path, err := backupPath(r.FormValue("file"))
+	if err == nil {
+		err = os.Remove(path)
+	}
+	s.renderBackups(w, r, err)
+}
+
 func (s *Server) newSandbox(w http.ResponseWriter, r *http.Request) {
 	name := r.FormValue("file")
 	path, err := backupPath(name)

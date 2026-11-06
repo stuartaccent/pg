@@ -236,6 +236,7 @@ templ BackupsBody(service, dir string, files []backupFile, sandboxes []dockerpg.
 				<span class="text-base-content/50 shrink-0 text-xs">{ f.Size }</span>
 				<button type="button" class="btn btn-soft btn-xs shrink-0" hx-post="/backups/verify" hx-vals={ fmt.Sprintf(`{"file":%q}`, f.Name) } hx-target="#job" onclick="document.querySelector('#backups').close()">Verify</button>
 				<button type="button" class="btn btn-soft btn-xs shrink-0" hx-post="/sandboxes" hx-vals={ fmt.Sprintf(`{"file":%q}`, f.Name) } hx-target="#job" onclick="document.querySelector('#backups').close()">Open in sandbox</button>
+				<button type="button" class="btn btn-soft btn-error btn-xs shrink-0" hx-post="/backups/delete" hx-vals={ fmt.Sprintf(`{"file":%q}`, f.Name) } hx-target="#backups-body" data-confirm={ "Delete " + f.Name + " for good? It won't go to the Trash." } aria-label={ "Delete " + f.Name }>Delete</button>
 			</li>
 		}
 	</ul>
