@@ -28,16 +28,23 @@ type job struct {
 	mu     sync.Mutex
 	line   string // the latest progress
 	done   bool
-	result string
+	result jobResult
 	err    error
 	told   bool // whether the page has seen it finish
 }
 
+// jobResult is what a finished job has to say.
+type jobResult struct {
+	Text    string
+	Connect string // a service to offer connecting to, if any
+}
+
 // jobView is a job as of now, for rendering.
 type jobView struct {
-	Label, Line, Result string
-	Running             bool
-	Err                 error
+	Label, Line string
+	Result      jobResult
+	Running     bool
+	Err         error
 }
 
 // view works on a nil job, which is the usual state of things.
@@ -58,7 +65,7 @@ func (j *job) progress(line string) {
 
 // start runs work in the background, one job at a time. It deliberately isn't
 // tied to the request, or to the service, as a backup outlasts both.
-func (s *Server) start(label string, work func(context.Context, func(string)) (string, error)) (*job, error) {
+func (s *Server) start(label string, work func(context.Context, func(string)) (jobResult, error)) (*job, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.job != nil && s.job.view().Running {
@@ -155,7 +162,7 @@ func humanSize(n int64) string {
 
 func (s *Server) renderBackups(w http.ResponseWriter, r *http.Request, err error) {
 	s.mu.Lock()
-	service := s.service
+	service, canRestore := s.service, s.service != "" && !s.readOnly
 	s.mu.Unlock()
 	dir, derr := backupDir()
 	var files []backupFile
@@ -163,7 +170,7 @@ func (s *Server) renderBackups(w http.ResponseWriter, r *http.Request, err error
 		files, derr = listBackups(dir)
 	}
 	_, sandboxes, _ := serviceList(r.Context())
-	render(w, r, BackupsBody(service, dir, files, sandboxes, cmp.Or(err, derr)))
+	render(w, r, BackupsBody(service, canRestore, dir, files, sandboxes, cmp.Or(err, derr)))
 }
 
 func (s *Server) backups(w http.ResponseWriter, r *http.Request) {
@@ -197,8 +204,9 @@ func (s *Server) backup(w http.ResponseWriter, r *http.Request) {
 		render(w, r, JobStatus(jobView{Label: "Backup", Err: errors.New("connect to a service first")}))
 		return
 	}
-	s.startAndRender(w, r, "Backing up "+service, func(ctx context.Context, progress func(string)) (string, error) {
-		return saveBackup(ctx, settings, image, progress)
+	s.startAndRender(w, r, "Backing up "+service, func(ctx context.Context, progress func(string)) (jobResult, error) {
+		saved, err := saveBackup(ctx, settings, image, progress)
+		return jobResult{Text: saved}, err
 	})
 }
 
@@ -246,15 +254,16 @@ func (s *Server) newSandbox(w http.ResponseWriter, r *http.Request) {
 		render(w, r, JobStatus(jobView{Label: "Sandbox", Err: err}))
 		return
 	}
-	s.startAndRender(w, r, "Opening sandbox", func(ctx context.Context, progress func(string)) (string, error) {
+	s.startAndRender(w, r, "Opening sandbox", func(ctx context.Context, progress func(string)) (jobResult, error) {
 		sb, ignored, err := dockerpg.NewSandbox(ctx, dockerpg.ImageForBackup(name), path, progress)
 		if err != nil {
-			return "", err
+			return jobResult{}, err
 		}
+		text := sb.Name + " is ready."
 		if ignored > 0 {
-			return fmt.Sprintf("%s is ready: pick it from the service list. The restore skipped %d errors.", sb.Name, ignored), nil
+			text += fmt.Sprintf(" The restore skipped %d errors.", ignored)
 		}
-		return sb.Name + " is ready: pick it from the service list.", nil
+		return jobResult{Text: text, Connect: sb.Name}, nil
 	})
 }
 
@@ -271,24 +280,59 @@ func (s *Server) verifyBackup(w http.ResponseWriter, r *http.Request) {
 	if !dockerpg.SameDatabase(name, database) {
 		connect = nil
 	}
-	s.startAndRender(w, r, "Verifying "+name, func(ctx context.Context, progress func(string)) (string, error) {
+	s.startAndRender(w, r, "Verifying "+name, func(ctx context.Context, progress func(string)) (jobResult, error) {
 		report, err := dockerpg.Verify(ctx, dockerpg.ImageForBackup(name), path, progress)
 		if err != nil {
-			return "", err
+			return jobResult{}, err
 		}
 		if problem := report.Problem(); problem != "" {
-			return "", errors.New(problem)
+			return jobResult{}, errors.New(problem)
 		}
 		summary := fmt.Sprintf("Verified %s: %d tables, %d rows.", name, len(report.Counts), report.Rows())
 		if connect == nil {
-			return summary, nil
+			return jobResult{Text: summary}, nil
 		}
 		progress("Comparing with the live database")
 		live, err := liveCounts(ctx, connect)
 		if err != nil {
-			return summary + " Couldn't compare with the live database: " + err.Error(), nil
+			return jobResult{Text: summary + " Couldn't compare with the live database: " + err.Error()}, nil
 		}
-		return summary + " " + describeDifferences(dockerpg.Differences(report.Counts, live)), nil
+		return jobResult{Text: summary + " " + describeDifferences(dockerpg.Differences(report.Counts, live))}, nil
+	})
+}
+
+func (s *Server) restoreBackup(w http.ResponseWriter, r *http.Request) {
+	name, database := r.FormValue("file"), r.FormValue("database")
+	path, err := backupPath(name)
+	s.mu.Lock()
+	service, readOnly := s.service, s.readOnly
+	target := dockerpg.Target{DSN: s.dsn, Settings: s.settings, Image: s.image}
+	s.mu.Unlock()
+	switch {
+	case err != nil:
+	case service == "":
+		err = errors.New("connect to a service first")
+	case readOnly:
+		err = errors.New(service + " is read-only")
+	case !dockerpg.ValidDatabase(database):
+		err = errors.New("not a usable database name: " + database)
+	}
+	if err != nil {
+		render(w, r, JobStatus(jobView{Label: "Restore", Err: err}))
+		return
+	}
+	// The part before any slash, so connecting works from a restored database too.
+	base, _, _ := strings.Cut(service, "/")
+	s.startAndRender(w, r, "Restoring to "+database, func(ctx context.Context, progress func(string)) (jobResult, error) {
+		report, err := dockerpg.Restore(ctx, target, path, database, progress)
+		if err != nil {
+			return jobResult{}, err
+		}
+		text := fmt.Sprintf("Restored to %s: %d tables, %d rows.", database, len(report.Counts), report.Rows())
+		if report.Ignored > 0 {
+			text += fmt.Sprintf(" It skipped %d errors, so check it before relying on it.", report.Ignored)
+		}
+		return jobResult{Text: text, Connect: base + "/" + database}, nil
 	})
 }
 
@@ -318,7 +362,7 @@ func describeDifferences(found []string) string {
 	return fmt.Sprintf("%d differ from the live database: %s.", len(found), strings.Join(found, "; "))
 }
 
-func (s *Server) startAndRender(w http.ResponseWriter, r *http.Request, label string, work func(context.Context, func(string)) (string, error)) {
+func (s *Server) startAndRender(w http.ResponseWriter, r *http.Request, label string, work func(context.Context, func(string)) (jobResult, error)) {
 	j, err := s.start(label, work)
 	if err != nil {
 		render(w, r, JobStatus(jobView{Label: label, Err: err}))
@@ -335,7 +379,9 @@ func (s *Server) removeSandbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.mu.Lock()
-	connected := s.service == name
+	// Any database inside it counts too.
+	base, _, _ := strings.Cut(s.service, "/")
+	connected := base == name
 	s.mu.Unlock()
 	if connected {
 		s.disconnect()

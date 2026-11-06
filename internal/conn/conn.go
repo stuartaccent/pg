@@ -108,6 +108,12 @@ func ServiceDSN(service string) string {
 	return "service=" + quote(service)
 }
 
+// WithDatabase returns dsn pointed at another database on the same server. A
+// later setting overrides an earlier one, and a service's own.
+func WithDatabase(dsn, database string) string {
+	return dsn + " dbname=" + quote(database)
+}
+
 // Connect opens a connection to the named service.
 func Connect(ctx context.Context, service string) (*pgconn.PgConn, error) {
 	return Open(ctx, ServiceDSN(service))

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -372,11 +373,201 @@ func TestVerify(t *testing.T) {
 	}
 }
 
-// emptySandbox starts a sandbox with nothing restored, to act as a source.
-func emptySandbox(t *testing.T, image string) (Sandbox, func()) {
+func TestRestoreImage(t *testing.T) {
+	for _, tt := range []struct{ name, server, want, wantErr string }{
+		{"a-pg17-20261105-100000.backup", "postgres:17", "postgres:17", ""},
+		{"a-pg16-20261105-100000.backup", "postgres:17", "postgres:17", ""},
+		{"a-pg17-20261105-100000.backup", "postgres:16", "", "from Postgres 17"},
+		{"other_app.backup", "postgres:15", "postgres:latest", ""},
+	} {
+		got, err := restoreImage(tt.name, tt.server)
+		if got != tt.want || (tt.wantErr == "") != (err == nil) {
+			t.Errorf("%s on %s: got %q, %v", tt.name, tt.server, got, err)
+		}
+	}
+}
+
+func TestRestoreName(t *testing.T) {
+	at := time.Date(2026, 11, 6, 9, 0, 0, 0, time.UTC)
+	for backup, want := range map[string]string{
+		"crm_db_training-pg17-20261105-100000.backup": "crm_db_training_restored_20261106",
+		"shop-db-next-pg17-20261105-100000.backup":    "shop_db_next_restored_20261106",
+		"other_app.backup":                            "other_app_restored_20261106",
+		"2026 dump.backup":                            "db_2026_dump_restored_20261106",
+	} {
+		got := RestoreName(backup, at)
+		if got != want {
+			t.Errorf("%s: got %q", backup, got)
+		}
+		if !ValidDatabase(got) {
+			t.Errorf("%q isn't valid", got)
+		}
+	}
+	long := RestoreName(strings.Repeat("x", 100)+".backup", at)
+	if !ValidDatabase(long) {
+		t.Errorf("long name invalid: %q (%d)", long, len(long))
+	}
+}
+
+func TestValidDatabase(t *testing.T) {
+	for name, want := range map[string]bool{
+		"ok_name": true, "_x": true, "Mixed1": true,
+		"": false, "1x": false, "a-b": false, "a b": false, `a"; drop database x; --`: false, strings.Repeat("x", 64): false,
+	} {
+		if got := ValidDatabase(name); got != want {
+			t.Errorf("%q: got %v", name, got)
+		}
+	}
+}
+
+func databases(t *testing.T, sb Sandbox) []string {
 	t.Helper()
 	ctx := context.Background()
-	sb := Sandbox{Name: sandboxPrefix + "test-source", Password: "test", Source: "none"}
+	c, err := conn.Open(ctx, sb.DSN())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close(ctx)
+	res, err := c.Exec(ctx, "select datname from pg_database where not datistemplate order by 1").ReadAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, row := range res[0].Rows {
+		names = append(names, string(row[0]))
+	}
+	return names
+}
+
+func TestRestore(t *testing.T) {
+	_, image := settings(t)
+	ctx := context.Background()
+	quiet := func(string) {}
+
+	source, cleanup := namedSandbox(t, image, "test-restore-source")
+	defer cleanup()
+	seed, err := conn.Open(ctx, source.DSN())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := seed.Exec(ctx, "create table kept (id int primary key); insert into kept select generate_series(1, 3)").ReadAll(); err != nil {
+		t.Fatal(err)
+	}
+	seed.Close(ctx)
+	s, err := conn.SettingsFor(source.DSN())
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	dest := filepath.Join(dir, BackupName("sandbox", image, time.Now()))
+	if err := Backup(ctx, s, image, dest, quiet); err != nil {
+		t.Fatal(err)
+	}
+
+	server, cleanupServer := namedSandbox(t, image, "test-restore-target")
+	defer cleanupServer()
+	ts, err := conn.SettingsFor(server.DSN())
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := Target{DSN: server.DSN(), Settings: ts, Image: image}
+
+	// An existing database with data in it, which nothing below may touch.
+	existing := conn.WithDatabase(server.DSN(), "precious")
+	admin, err := conn.Open(ctx, server.DSN())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close(ctx)
+	if _, err := admin.Exec(ctx, "create database precious").ReadAll(); err != nil {
+		t.Fatal(err)
+	}
+	p, err := conn.Open(ctx, existing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Exec(ctx, "create table mine (id int); insert into mine values (42)").ReadAll(); err != nil {
+		t.Fatal(err)
+	}
+	p.Close(ctx)
+	preciousIntact := func(when string) {
+		t.Helper()
+		c, err := conn.Open(ctx, existing)
+		if err != nil {
+			t.Fatalf("%s: precious is gone: %v", when, err)
+		}
+		defer c.Close(ctx)
+		res, err := c.Exec(ctx, "select id from mine").ReadAll()
+		if err != nil || string(res[0].Rows[0][0]) != "42" {
+			t.Fatalf("%s: precious changed: %v", when, err)
+		}
+	}
+
+	report, err := Restore(ctx, target, dest, "fresh", quiet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.ListedTables != 1 || report.Rows() != 3 {
+		t.Errorf("report = %+v", report)
+	}
+	c, err := conn.Open(ctx, conn.WithDatabase(server.DSN(), "fresh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := c.Exec(ctx, "select count(*), current_database() from kept").ReadAll()
+	c.Close(ctx)
+	if err != nil || string(res[0].Rows[0][0]) != "3" || string(res[0].Rows[0][1]) != "fresh" {
+		t.Errorf("restored: %v, %v", res, err)
+	}
+
+	// A name that's taken stops everything, and the database that holds it stays.
+	if _, err := Restore(ctx, target, dest, "precious", quiet); err == nil {
+		t.Fatal("a taken name: want an error")
+	}
+	preciousIntact("after a taken name")
+
+	// A bad backup leaves nothing behind.
+	data, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	broken := filepath.Join(dir, "broken.backup")
+	if err := os.WriteFile(broken, data[:len(data)/2], 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Restore(ctx, target, broken, "halfway", quiet); err == nil {
+		t.Fatal("a broken backup: want an error")
+	}
+
+	// Stopping leaves nothing behind either.
+	stopped, cancel := context.WithCancel(ctx)
+	defer cancel()
+	if _, err := Restore(stopped, target, dest, "stopped", func(line string) {
+		if strings.HasPrefix(line, "Restoring") {
+			cancel()
+		}
+	}); err == nil {
+		t.Fatal("stopped: want an error")
+	}
+
+	if _, err := Restore(ctx, target, dest, `bad"; drop database precious; --`, quiet); err == nil {
+		t.Fatal("a bad name: want an error")
+	}
+	preciousIntact("at the end")
+	if got := databases(t, server); !slices.Equal(got, []string{"fresh", "postgres", "precious", "sandbox"}) {
+		t.Errorf("databases = %v", got)
+	}
+}
+
+// emptySandbox starts a sandbox with nothing restored, to act as a source.
+func emptySandbox(t *testing.T, image string) (Sandbox, func()) {
+	return namedSandbox(t, image, "test-source")
+}
+
+func namedSandbox(t *testing.T, image, name string) (Sandbox, func()) {
+	t.Helper()
+	ctx := context.Background()
+	sb := Sandbox{Name: sandboxPrefix + name, Password: "test", Source: "none"}
 	_ = Remove(ctx, sb.Name)
 	if _, err := output(ctx, []string{"POSTGRES_PASSWORD=test", "POSTGRES_DB=" + sandboxDB},
 		"run", "--detach", "--rm", "--name", sb.Name, "--label", sandboxLabel,

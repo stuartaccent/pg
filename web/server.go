@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -36,6 +37,7 @@ type Server struct {
 	mu       sync.Mutex
 	service  string                                        // guarded by mu
 	readOnly bool                                          // guarded by mu
+	dsn      string                                        // guarded by mu
 	settings conn.Settings                                 // guarded by mu
 	image    string                                        // guarded by mu; the matching Postgres image
 	connect  func(context.Context) (*pgconn.PgConn, error) // guarded by mu; nil until connected
@@ -59,6 +61,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /backups/open", s.openBackups)
 	mux.HandleFunc("POST /backup", s.backup)
 	mux.HandleFunc("POST /backups/verify", s.verifyBackup)
+	mux.HandleFunc("POST /backups/restore", s.restoreBackup)
 	mux.HandleFunc("POST /backups/delete", s.deleteBackup)
 	mux.HandleFunc("POST /sandboxes", s.newSandbox)
 	mux.HandleFunc("POST /sandboxes/{name}/remove", s.removeSandbox)
@@ -101,7 +104,7 @@ func (s *Server) disconnect() {
 	s.mu.Lock()
 	sessions, cat := s.sessions, s.cat
 	s.sessions, s.cat, s.connect, s.service, s.readOnly = map[string]*session.Session{}, nil, nil, "", false
-	s.settings, s.image = conn.Settings{}, ""
+	s.dsn, s.settings, s.image = "", conn.Settings{}, ""
 	s.mu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -157,18 +160,24 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) connectService(w http.ResponseWriter, r *http.Request) {
+	// service/database reaches another database on a service's server, for
+	// connecting to one that's just been restored.
 	service := r.FormValue("service")
+	base, database, _ := strings.Cut(service, "/")
 	services, sandboxes, err := serviceList(r.Context())
-	if err == nil && !slices.Contains(services, service) {
-		err = errors.New("unknown service " + strconv.Quote(service))
+	if err == nil && !slices.Contains(services, base) {
+		err = errors.New("unknown service " + strconv.Quote(base))
 	}
 	if err != nil {
 		s.connectFailed(w, r, services, err)
 		return
 	}
-	dsn := conn.ServiceDSN(service)
-	if i := slices.IndexFunc(sandboxes, func(sb dockerpg.Sandbox) bool { return sb.Name == service }); i >= 0 {
+	dsn := conn.ServiceDSN(base)
+	if i := slices.IndexFunc(sandboxes, func(sb dockerpg.Sandbox) bool { return sb.Name == base }); i >= 0 {
 		dsn = sandboxes[i].DSN()
+	}
+	if database != "" {
+		dsn = conn.WithDatabase(dsn, database)
 	}
 
 	// Sessions and the catalog connect when first used. This one proves the
@@ -194,10 +203,10 @@ func (s *Server) connectService(w http.ResponseWriter, r *http.Request) {
 	}
 	s.disconnect()
 	s.mu.Lock()
-	s.service, s.readOnly, s.connect, s.settings, s.image = service, readOnly, connect, settings, image
+	s.service, s.readOnly, s.connect, s.dsn, s.settings, s.image = service, readOnly, connect, dsn, settings, image
 	s.cat = catalog.New(connect)
 	s.mu.Unlock()
-	w.Header().Set("HX-Trigger", "connected") // reloads the tree
+	w.Header().Set("HX-Trigger", "connected, services-changed") // reloads the tree and the dropdown
 	render(w, r, ConnectStatus(service, readOnly, nil))
 }
 
