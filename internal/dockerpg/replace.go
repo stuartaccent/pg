@@ -62,8 +62,8 @@ func execute(ctx context.Context, c *pgconn.PgConn, sql string) error {
 // list settings such as search_path quoted properly, and an ICU default
 // collation becomes the libc one. Add them if a database ever relies on these.
 func Replace(ctx context.Context, t Target, backup, database string, at time.Time, progress func(string)) (Report, string, error) {
-	if database == maintenanceDB {
-		return Report{}, "", errors.New("can't replace " + maintenanceDB + ": it's what this works from")
+	if why := CanReplace(database); why != "" {
+		return Report{}, "", errors.New(why)
 	}
 	image, err := restoreImage(filepath.Base(backup), t.Image)
 	if err != nil {

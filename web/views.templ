@@ -280,15 +280,15 @@ templ BackupsBody(service, database string, canRestore bool, dir string, files [
 			<li class="flex items-center gap-2 py-1">
 				<span class="min-w-0 flex-1 truncate font-mono text-xs" title={ f.Name }>{ f.Name }</span>
 				<span class="text-base-content/50 shrink-0 text-xs">{ f.Size }</span>
-				<button type="button" class="btn btn-soft btn-xs shrink-0" hx-post="/backups/verify" hx-vals={ fmt.Sprintf(`{"file":%q}`, f.Name) } hx-target="#job" onclick="document.querySelector('#backups').close()">Verify</button>
-				<button type="button" class="btn btn-soft btn-xs shrink-0" hx-post="/sandboxes" hx-vals={ fmt.Sprintf(`{"file":%q}`, f.Name) } hx-target="#job" onclick="document.querySelector('#backups').close()">Sandbox</button>
+				<button type="button" class="btn btn-soft btn-xs shrink-0" hx-post="/backups/verify" hx-vals={ fileValues(f.Name) } hx-target="#job" onclick="document.querySelector('#backups').close()">Verify</button>
+				<button type="button" class="btn btn-soft btn-xs shrink-0" hx-post="/sandboxes" hx-vals={ fileValues(f.Name) } hx-target="#job" onclick="document.querySelector('#backups').close()">Sandbox</button>
 				if canRestore {
 					<button type="button" class="btn btn-soft btn-xs shrink-0" data-file={ f.Name } data-name={ dockerpg.RestoreName(f.Name, time.Now()) } data-service={ service } onclick="showRestore(this)">Restore</button>
 					if database != "" {
 						<button type="button" class="btn btn-soft btn-warning btn-xs shrink-0" data-file={ f.Name } data-database={ database } data-other={ fmt.Sprint(!dockerpg.SameDatabase(f.Name, database)) } onclick="showReplace(this)">Replace</button>
 					}
 				}
-				<button type="button" class="btn btn-soft btn-error btn-xs shrink-0" hx-post="/backups/delete" hx-vals={ fmt.Sprintf(`{"file":%q}`, f.Name) } hx-target="#backups-body" data-confirm={ "Delete " + f.Name + " for good? It won't go to the Trash." } aria-label={ "Delete " + f.Name }>Delete</button>
+				<button type="button" class="btn btn-soft btn-error btn-xs shrink-0" hx-post="/backups/delete" hx-vals={ fileValues(f.Name) } hx-target="#backups-body" data-confirm={ "Delete " + f.Name + " for good? It won't go to the Trash." } aria-label={ "Delete " + f.Name }>Delete</button>
 			</li>
 		}
 	</ul>
@@ -379,6 +379,11 @@ templ treeLabel(n catalog.Node) {
 			<button type="button" class="cursor-pointer shrink-0 ml-auto text-base-content/60 opacity-0 hover:underline group-hover:opacity-100 focus:opacity-100" aria-label={ "Show the definition of " + n.Label } data-url={ definitionURL(n) } onclick="useDefinition(event, this)">DDL</button>
 		}
 	</span>
+}
+
+// fileValues is the hx-vals naming a backup.
+func fileValues(name string) string {
+	return fmt.Sprintf(`{"file":%q}`, name)
 }
 
 func treeURL(kind, id string) string {
