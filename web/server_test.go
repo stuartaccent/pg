@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -165,9 +166,9 @@ func TestQueriesStayInTheFolder(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	s := New()
-	for _, name := range []string{"", "../escape", "a/b", ".hidden", ".."} {
+	for _, name := range []string{"", "../escape", "a/../../escape", "/tmp/escape", "a//b", "a/", ".hidden", "a/.hidden", ".."} {
 		w := postForm(s, "/queries", url.Values{"name": {name}, "text": {"select 1"}})
-		if !strings.Contains(w.Body.String(), "slash") {
+		if !strings.Contains(w.Body.String(), "dot") {
 			t.Errorf("save %q = %d %q", name, w.Code, w.Body)
 		}
 	}
@@ -177,8 +178,41 @@ func TestQueriesStayInTheFolder(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(home, "secret.sql"), []byte("secret"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if body := get(t, s, http.MethodGet, "/queries/..%2Fsecret").Body.String(); strings.Contains(body, "secret\n") || body == "secret" {
-		t.Errorf("read outside the folder: %q", body)
+	for _, url := range []string{"/queries/..%2Fsecret", "/queries/a%2F..%2F..%2Fsecret", "/queries/a/..%2F..%2Fsecret"} {
+		if body := get(t, s, http.MethodGet, url).Body.String(); body == "secret" {
+			t.Errorf("%s read outside the folder", url)
+		}
+	}
+}
+
+func TestQueriesInSubfolders(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	s := New()
+	w := postForm(s, "/queries", url.Values{"name": {"stats/deep/Sizes"}, "text": {"select 1"}})
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("save = %d %q", w.Code, w.Body)
+	}
+	if body := get(t, s, http.MethodGet, "/queries/stats%2Fdeep%2FSizes").Body.String(); body != "select 1" {
+		t.Errorf("read = %q", body)
+	}
+	git := filepath.Join(home, "pg-queries", ".git")
+	if err := os.Mkdir(git, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(git, "inside.sql"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(home, "pg-queries")
+	got, err := listQueries(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(got, "stats/deep/Sizes") || !slices.Contains(got, "Table sizes") {
+		t.Errorf("list = %q", got)
+	}
+	if slices.ContainsFunc(got, func(name string) bool { return strings.Contains(name, "inside") }) {
+		t.Errorf("listed a hidden folder: %q", got)
 	}
 }
 

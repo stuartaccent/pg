@@ -35,27 +35,42 @@ func queryDir() (string, error) {
 	return dir, os.CopyFS(dir, files)
 }
 
-// listQueries returns the names of the queries in dir, without the .sql.
+// listQueries returns the queries in dir and its subfolders, as paths relative
+// to it without the .sql. Anything hidden is left out, so that a .git isn't
+// searched.
 func listQueries(dir string) ([]string, error) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, err
-	}
 	var names []string
-	for _, e := range entries {
-		if name, ok := strings.CutSuffix(e.Name(), ".sql"); ok && e.Type().IsRegular() && !strings.HasPrefix(name, ".") {
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		switch {
+		case err != nil:
+			return err
+		case path == dir:
+			return nil
+		case strings.HasPrefix(d.Name(), ".") && d.IsDir():
+			return filepath.SkipDir
+		case strings.HasPrefix(d.Name(), "."):
+			return nil
+		}
+		if name, ok := strings.CutSuffix(strings.TrimPrefix(path, dir+"/"), ".sql"); ok && d.Type().IsRegular() {
 			names = append(names, name)
 		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	slices.SortFunc(names, func(a, b string) int { return strings.Compare(strings.ToLower(a), strings.ToLower(b)) })
 	return names, nil
 }
 
-// queryPath returns the path of the query called name, which has to be
-// directly in the folder.
+// queryPath returns the path of the query called name, which can be in a
+// subfolder but has to stay inside the folder. Ruling out parts that are empty
+// or start with a dot rules out .. and absolute paths along with hidden files.
 func queryPath(name string) (string, error) {
-	if name != filepath.Base(name) || strings.HasPrefix(name, ".") {
-		return "", errors.New("a name can't contain a slash or start with a dot")
+	for part := range strings.SplitSeq(name, "/") {
+		if part == "" || strings.HasPrefix(part, ".") {
+			return "", errors.New("names and folders can't be empty or start with a dot")
+		}
 	}
 	dir, err := queryDir()
 	if err != nil {
@@ -124,6 +139,9 @@ func (s *Server) saveQuery(w http.ResponseWriter, r *http.Request) {
 }
 
 func writeQuery(path, text string, overwrite bool) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
 	flags := os.O_WRONLY | os.O_CREATE | os.O_EXCL
 	if overwrite {
 		flags = os.O_WRONLY | os.O_CREATE | os.O_TRUNC
