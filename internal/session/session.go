@@ -202,7 +202,7 @@ func (s *Session) begin() (context.Context, *query, error) {
 	s.cancel = cancel
 	s.cancelMu.Unlock()
 
-	q := &query{id: nextID.Add(1), cancel: cancel, start: time.Now()}
+	q := &query{id: nextID.Add(1), cancel: cancel}
 	if s.closed {
 		cancel()
 		return ctx, q, ErrClosed
@@ -226,6 +226,9 @@ func (s *Session) begin() (context.Context, *query, error) {
 		}
 		s.conn = fresh
 	}
+	// Timed from here, so the check above doesn't count: on a distant server,
+	// it would double the time a quick query seems to take.
+	q.start = time.Now()
 	return ctx, q, nil
 }
 
