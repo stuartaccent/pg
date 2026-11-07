@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io/fs"
 	"net/http"
@@ -213,6 +214,55 @@ func TestQueriesInSubfolders(t *testing.T) {
 	}
 	if slices.ContainsFunc(got, func(name string) bool { return strings.Contains(name, "inside") }) {
 		t.Errorf("listed a hidden folder: %q", got)
+	}
+}
+
+func TestOpenQueryWithTheDialog(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	root := filepath.Join(home, "pg-queries")
+	s := New()
+	open := func() *httptest.ResponseRecorder { return postForm(s, "/queries/pick", nil) }
+
+	if got := open().Code; got != http.StatusNotImplemented {
+		t.Errorf("no dialog = %d", got)
+	}
+
+	var started string
+	chosen := ""
+	s.OpenFile = func(dir string) (string, error) {
+		started = dir
+		return chosen, nil
+	}
+	if got := open().Code; got != http.StatusNoContent || started != root {
+		t.Errorf("cancelled = %d, started in %q", got, started)
+	}
+
+	elsewhere := filepath.Join(t.TempDir(), "migration.sql")
+	for path, want := range map[string]string{
+		filepath.Join(root, "stats", "Sizes.sql"): "stats/Sizes",
+		elsewhere: elsewhere,
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("select 'é'"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		chosen = path
+		w := open()
+		var got struct{ Name, Text string }
+		if err := json.NewDecoder(w.Body).Decode(&got); err != nil || w.Code != http.StatusOK {
+			t.Fatalf("%s: %d %v", path, w.Code, err)
+		}
+		if got.Name != want || got.Text != "select 'é'" {
+			t.Errorf("%s: got %+v, want name %q", path, got, want)
+		}
+	}
+
+	chosen = filepath.Join(root, "gone.sql")
+	if got := open().Code; got != http.StatusInternalServerError {
+		t.Errorf("missing file = %d", got)
 	}
 }
 

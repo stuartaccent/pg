@@ -2,6 +2,7 @@ package web
 
 import (
 	"embed"
+	"encoding/json"
 	"errors"
 	"io"
 	"io/fs"
@@ -180,13 +181,46 @@ func (s *Server) chooseQuery(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	name := strings.TrimSuffix(path, ".sql")
-	if inside, ok := strings.CutPrefix(name, root+"/"); ok {
-		name = inside
-	} else {
-		name = path
+	_, _ = io.WriteString(w, queryName(root, path))
+}
+
+// queryName is how a tab refers to the query at path: its name if it's in the
+// folder, otherwise the whole path, which Save won't offer again.
+func queryName(root, path string) string {
+	if inside, ok := strings.CutPrefix(strings.TrimSuffix(path, ".sql"), root+"/"); ok {
+		return inside
 	}
-	_, _ = io.WriteString(w, name)
+	return path
+}
+
+// pickQuery reads a file chosen with the Open dialog, from anywhere, and
+// answers with its name, as queryName gives it, and its text.
+func (s *Server) pickQuery(w http.ResponseWriter, r *http.Request) {
+	if s.OpenFile == nil {
+		http.Error(w, "no open dialog", http.StatusNotImplemented)
+		return
+	}
+	root, err := queryDir()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	path, err := s.OpenFile(root)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if path == "" {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	text, err := os.ReadFile(path)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{"name": queryName(root, path), "text": string(text)})
 }
 
 func writeQuery(path, text string, overwrite bool) error {

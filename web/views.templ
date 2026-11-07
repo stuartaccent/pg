@@ -244,7 +244,13 @@ templ tabPanel(id string) {
 			<button id={ "export-" + id } type="button" class="btn btn-ghost btn-sm" hx-post="/export/choose" hx-vals={ fmt.Sprintf(`{"tab":%q}`, id) } hx-target="#notice">Export CSV</button>
 			<span class="hidden" hx-post="/export" hx-trigger={ "export-ready from:#export-" + id } hx-include={ "#editor-" + id } hx-target="#notice" hx-indicator={ "#running-" + id }></span>
 			<button type="button" class="btn btn-ghost btn-sm" onclick="showHistory()">History</button>
-			<button type="button" class="btn btn-ghost btn-sm" onclick="showQueries()">Queries</button>
+			<details class="dropdown">
+				<summary class="btn btn-ghost btn-sm">Queries</summary>
+				<ul class="menu dropdown-content z-10 w-44 rounded-box bg-base-200 shadow-md">
+					<li><button type="button" onclick="this.closest('details').open = false; showQueries()">Saved queries…</button></li>
+					<li><button type="button" onclick="this.closest('details').open = false; openQueryFile()">Open file…</button></li>
+				</ul>
+			</details>
 			<button type="button" class="btn btn-ghost btn-sm" onclick="saveQuery()">Save</button>
 			<span id={ "running-" + id } class="htmx-indicator flex items-center gap-1 text-base-content/60">
 				<span class="loading loading-spinner loading-xs"></span>

@@ -39,6 +39,9 @@ type Server struct {
 	// serving. Without it, as in a browser, exports go to ~/Downloads and
 	// queries are named in a dialog of the page's own.
 	ChooseFile func(dir, name string) (string, error)
+	// OpenFile asks which .sql file to open, starting in dir, and returns "" if
+	// cancelled. Without it, as in a browser, only saved queries can be opened.
+	OpenFile func(dir string) (string, error)
 
 	mu       sync.Mutex
 	service  string                                        // guarded by mu
@@ -91,6 +94,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /queries", s.saveQuery)
 	mux.HandleFunc("POST /queries/choose", s.chooseQuery)
 	mux.HandleFunc("POST /queries/open", s.openQueries)
+	mux.HandleFunc("POST /queries/pick", s.pickQuery)
 	mux.HandleFunc("GET /queries/{name...}", s.readQuery)
 	mux.HandleFunc("GET /activity", s.activity)
 	mux.HandleFunc("POST /activity/{pid}/{action}", s.stopBackend)
