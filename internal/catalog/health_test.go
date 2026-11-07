@@ -77,6 +77,22 @@ func TestHealth(t *testing.T) {
 		}
 	}
 
+	// So does one starting with its first column, or leaving out nulls.
+	for _, sql := range []string{
+		"create temp table health_lead (pair_id int, pair_kind text, foreign key (pair_id, pair_kind) references health_pair)",
+		"create index on health_lead (pair_id)",
+		"create temp table health_partial (parent_id int references health_parent)",
+		"create index on health_partial (parent_id) where parent_id is not null",
+		"create temp table health_other (parent_id int references health_parent, flag bool)",
+		"create index on health_other (parent_id) where flag",
+		"create temp table health_second (pair_id int, pair_kind text, foreign key (pair_id, pair_kind) references health_pair)",
+		"create index on health_second (pair_kind)",
+	} {
+		if _, err := c.read(ctx, sql, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+
 	// An index on the foreign key's columns, first, answers it.
 	if _, err := c.read(ctx, "create index health_c on health_child (parent_id, id)", nil); err != nil {
 		t.Fatal(err)
@@ -94,6 +110,18 @@ func TestHealth(t *testing.T) {
 	}
 	if has("Unindexed foreign keys", "health_pair_child") {
 		t.Error("listed with a unique index on part of it")
+	}
+	if has("Unindexed foreign keys", "health_lead") {
+		t.Error("listed with an index on its first column")
+	}
+	if has("Unindexed foreign keys", "health_partial") {
+		t.Error("listed with an index leaving out nulls")
+	}
+	if !has("Unindexed foreign keys", "health_other") {
+		t.Error("an index on other rows answered it")
+	}
+	if !has("Unindexed foreign keys", "health_second") {
+		t.Error("an index on its second column answered it")
 	}
 }
 
