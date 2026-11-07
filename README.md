@@ -12,8 +12,13 @@ Connections come from `~/.pg_service.conf` (or `$PGSERVICEFILE`), passwords from
 host=localhost
 port=5432
 dbname=postgres
-user=stuart
+user=postgres
+
+# ~/.pgpass, as host:port:database:user:password
+localhost:5432:*:postgres:password
 ```
+
+Postgres ignores `.pgpass` unless only you can read it, so run `chmod 600 ~/.pgpass` after making it. pg warns if it's readable by others.
 
 To make a service read-only, for production say, add this line to it. pg shows a badge when it's on. It's a safety net rather than a lock, as `set default_transaction_read_only = off` turns it back off (Postgres 14 or later is needed for the badge).
 
