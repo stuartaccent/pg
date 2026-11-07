@@ -2896,7 +2896,12 @@ func summaryText(p session.Page) string {
 		parts = append(parts, fmt.Sprintf("%d rows", p.Total))
 	}
 	parts = append(parts, p.Tags...)
-	parts = append(parts, p.Elapsed.Round(time.Millisecond).String())
+	// Finer under a second, where a nearby server's round trip is well under 1ms.
+	precision := time.Millisecond
+	if p.Elapsed < time.Second {
+		precision = 10 * time.Microsecond
+	}
+	parts = append(parts, p.Elapsed.Round(precision).String())
 	return strings.Join(parts, " · ")
 }
 
