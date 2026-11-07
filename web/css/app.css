@@ -30,3 +30,14 @@
 #tabs:has(> :only-child) .tab-close {
     display: none;
 }
+
+/* Near the top rather than centred, so a dialog whose content changes size
+   grows downwards instead of jumping about. */
+.modal {
+    align-items: start;
+}
+
+.modal-box {
+    margin-top: 8vh;
+    max-height: 84vh;
+}
