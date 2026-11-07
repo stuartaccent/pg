@@ -307,6 +307,20 @@ async function saveQuery() {
 	}
 }
 
+// Opens a .sql file from anywhere with the app's Open dialog.
+async function openQueryFile() {
+	const notice = document.querySelector("#notice");
+	const res = await fetch("/queries/pick", { method: "POST" });
+	if (res.status === 204) return;
+	if (!res.ok) {
+		notice.textContent = res.status === 501 ? "Opening a file needs the app: use Saved queries here." : (await res.text()).trim();
+		return;
+	}
+	const { name, text } = await res.json();
+	await openSQL(text);
+	if (!name.startsWith("/")) tabQueries.set(activeTab, name);
+}
+
 function showSaveQuery(name, text) {
 	document.querySelector("#save-name").value = name;
 	document.querySelector("#save-text").value = text;
@@ -529,7 +543,7 @@ document.addEventListener("keydown", (event) => {
 	resize(bar, sizeOf(bar) + step);
 });
 
-Object.assign(window, { fromMenu, newTab, closeActiveTab, selectTab, closeTab, closeAllTabs, useSQL, useDefinition, resetTree, formatSQL, showHistory, showQueries, useQuery, saveQuery, showActivity, activityLive, showBackups, showRestore, closeRestore, showReplace, checkReplace, closeReplace, renderHistory, copyCell, copyPlan });
+Object.assign(window, { fromMenu, newTab, closeActiveTab, selectTab, closeTab, closeAllTabs, useSQL, useDefinition, resetTree, formatSQL, showHistory, showQueries, useQuery, openQueryFile, saveQuery, showActivity, activityLive, showBackups, showRestore, closeRestore, showReplace, checkReplace, closeReplace, renderHistory, copyCell, copyPlan });
 
 // Wails holds back the menu's commands until its runtime says the page is ready.
 // This page doesn't load that runtime, so it says so itself.
@@ -543,6 +557,15 @@ document.addEventListener("click", (event) => {
 // The values given for each tab's :names, for htmx:configRequest to use. Export
 // asks before its Save dialog, so they have to wait for its second request.
 const paramValues = new Map();
+
+// <details> menus only close by clicking their own button, unlike a real menu.
+const closeMenus = (except) => {
+	for (const menu of document.querySelectorAll("details.dropdown[open]")) {
+		if (!menu.contains(except)) menu.open = false;
+	}
+};
+document.addEventListener("click", (event) => closeMenus(event.target));
+document.addEventListener("keydown", (event) => event.key === "Escape" && closeMenus());
 
 // Sends the selection rather than the whole editor, and remembers what ran.
 document.addEventListener("htmx:configRequest", (event) => {

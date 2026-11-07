@@ -68,6 +68,14 @@ func main() {
 		return dialog.PromptForSingleSelection()
 	}
 
+	srv.OpenFile = func(dir string) (string, error) {
+		return app.Dialog.OpenFile().
+			SetDirectory(dir).
+			AddFilter("SQL", "*.sql").
+			CanChooseFiles(true).
+			PromptForSingleSelection()
+	}
+
 	// Options.Icon alone doesn't reach the Dock: run outside an app bundle, macOS
 	// puts the default tile back when launching finishes, so set it after that.
 	app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
@@ -136,6 +144,7 @@ func appMenu(app *application.App) *application.Menu {
 	file.AddSeparator()
 	add("Save Query…", "CmdOrCtrl+S", "saveQuery")
 	add("Saved Queries…", "", "showQueries")
+	add("Open Query File…", "CmdOrCtrl+O", "openQueryFile")
 	add("History…", "", "showHistory")
 	file.AddSeparator()
 	add("Activity…", "", "showActivity")
