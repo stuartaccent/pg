@@ -1,6 +1,7 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -72,6 +73,29 @@ func TestStopBackendRefuses(t *testing.T) {
 	s.cat = catalog.New(func(context.Context) (*pgconn.PgConn, error) { return nil, errors.New("no server here") })
 	if body := get(t, s, http.MethodPost, "/activity/1/terminate").Body.String(); !strings.Contains(body, "read-only") {
 		t.Errorf("terminate = %q", body)
+	}
+}
+
+func TestHealthNeedsAConnection(t *testing.T) {
+	if body := get(t, New(), http.MethodGet, "/health").Body.String(); !strings.Contains(body, "connect to a service first") {
+		t.Errorf("body = %s", body)
+	}
+}
+
+func TestHealthBody(t *testing.T) {
+	report := catalog.Report{Checks: []catalog.Check{
+		{Name: "Found", Reason: "why", SQL: "select 'x'", Columns: []string{"a"}, Rows: [][]string{{"<b>"}}},
+		{Name: "Clean", Reason: "why", Usage: true},
+		{Name: "Broken", Reason: "why", Err: errors.New("permission denied")},
+	}}
+	var b bytes.Buffer
+	if err := HealthBody(report, nil).Render(context.Background(), &b); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"since the database was made or restored", `>1</span>`, `>none</span>`, `>usage</span>`, "permission denied", "&lt;b&gt;", `data-sql="select &#39;x&#39;"`} {
+		if !strings.Contains(b.String(), want) {
+			t.Errorf("missing %s", want)
+		}
 	}
 }
 

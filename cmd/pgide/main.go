@@ -148,6 +148,7 @@ func appMenu(app *application.App) *application.Menu {
 	add("History…", "", "showHistory")
 	file.AddSeparator()
 	add("Activity…", "", "showActivity")
+	add("Health…", "", "showHealth")
 	add("Backups…", "", "showBackups")
 	menu.AddRole(application.EditMenu)
 	menu.AddRole(application.ViewMenu)

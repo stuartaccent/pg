@@ -551,6 +551,15 @@ func (c *Catalog) Completions(ctx context.Context) (Completions, error) {
 
 // read runs sql on the catalog's connection, opening it if need be.
 func (c *Catalog) read(ctx context.Context, sql string, params [][]byte) ([][][]byte, error) {
+	res, err := c.query(ctx, sql, params)
+	if err != nil {
+		return nil, err
+	}
+	return res.Rows, nil
+}
+
+// query is read, keeping the column names.
+func (c *Catalog) query(ctx context.Context, sql string, params [][]byte) (*pgconn.Result, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.closed {
@@ -564,7 +573,7 @@ func (c *Catalog) read(ctx context.Context, sql string, params [][]byte) ([][][]
 		c.conn = fresh
 	}
 	res := c.conn.ExecParams(ctx, sql, params, nil, nil, nil).Read()
-	return res.Rows, res.Err
+	return res, res.Err
 }
 
 // Close closes the connection, if one was opened.
