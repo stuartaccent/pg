@@ -97,6 +97,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /queries/pick", s.pickQuery)
 	mux.HandleFunc("GET /queries/{name...}", s.readQuery)
 	mux.HandleFunc("GET /activity", s.activity)
+	mux.HandleFunc("GET /health", s.health)
 	mux.HandleFunc("POST /activity/{pid}/{action}", s.stopBackend)
 	return noStore(mux)
 }
@@ -538,6 +539,21 @@ func (s *Server) renderActivity(w http.ResponseWriter, r *http.Request, stopErr 
 	defer cancel()
 	backends, err := cat.Activity(ctx)
 	render(w, r, ActivityBody(backends, !readOnly, errors.Join(stopErr, err)))
+}
+
+// health runs the health checks on the connected database.
+func (s *Server) health(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	cat := s.cat
+	s.mu.Unlock()
+	if cat == nil {
+		render(w, r, HealthBody(catalog.Report{}, errors.New("connect to a service first")))
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	report, err := cat.Health(ctx)
+	render(w, r, HealthBody(report, err))
 }
 
 // stopBackend cancels a connection's query or ends the connection. Neither

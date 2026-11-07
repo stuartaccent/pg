@@ -340,6 +340,14 @@ async function showActivity() {
 	showUnfocused(document.querySelector("#activity"));
 }
 
+// Opens at once with a spinner, as the checks can take a moment on a big database.
+async function showHealth() {
+	const body = document.querySelector("#health-body");
+	body.innerHTML = '<span class="loading loading-spinner loading-sm"></span>';
+	showUnfocused(document.querySelector("#health"));
+	await htmx.ajax("GET", "/health", { target: body });
+}
+
 // Whether the list can refresh. Not under another dialog: replacing the row
 // behind a confirm would lose its Terminate. Nor while text is being selected.
 const activityLive = () =>
@@ -543,7 +551,7 @@ document.addEventListener("keydown", (event) => {
 	resize(bar, sizeOf(bar) + step);
 });
 
-Object.assign(window, { fromMenu, newTab, closeActiveTab, selectTab, closeTab, closeAllTabs, useSQL, useDefinition, resetTree, formatSQL, showHistory, showQueries, useQuery, openQueryFile, saveQuery, showActivity, activityLive, showBackups, showRestore, closeRestore, showReplace, checkReplace, closeReplace, renderHistory, copyCell, copyPlan });
+Object.assign(window, { fromMenu, newTab, closeActiveTab, selectTab, closeTab, closeAllTabs, useSQL, useDefinition, resetTree, formatSQL, showHistory, showQueries, useQuery, openQueryFile, saveQuery, showActivity, showHealth, activityLive, showBackups, showRestore, closeRestore, showReplace, checkReplace, closeReplace, renderHistory, copyCell, copyPlan });
 
 // Wails holds back the menu's commands until its runtime says the page is ready.
 // This page doesn't load that runtime, so it says so itself.

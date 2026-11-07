@@ -109,6 +109,7 @@ Built along the way, outside the lists above.
 
 - [x] Activity dialog: every connection on the server, refreshing every 2 seconds, showing what's blocking what, with Cancel and Terminate.
 - [x] Roles in the tree: memberships, grants in this database, and a definition without the password.
+- [x] Health dialog: foreign keys without an index, duplicate and invalid indexes, wraparound, unused indexes, dead rows and sequential scans.
 
 ### Saved queries
 
