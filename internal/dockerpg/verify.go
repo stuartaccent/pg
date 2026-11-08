@@ -23,6 +23,9 @@ type Report struct {
 	Counts       map[string]int64 // rows in each table that was restored
 	Ignored      int              // errors the restore skipped over
 	FirstError   string           // the first of them, if known
+	// SchemaOnly is set when the backup lists tables but none of their rows,
+	// as a schema-only dump does.
+	SchemaOnly bool
 }
 
 // Rows returns the total rows restored.
@@ -49,17 +52,21 @@ func (r Report) Problem() string {
 
 var listedTable = regexp.MustCompile(`(?m)^\d+;\s+\d+\s+\d+\s+TABLE\s+(\S+)`)
 
-// countListedTables counts the tables in pg_restore --list's output. Entries
-// are "TABLE schema name", beside "TABLE DATA" for a table's rows and "TABLE
-// ATTACH" for a partition, which aren't tables of their own.
-func countListedTables(list string) int {
-	total := 0
+// countListedTables counts the tables in pg_restore --list's output, and
+// whether any of their rows are there. Entries are "TABLE schema name", beside
+// "TABLE DATA" for a table's rows and "TABLE ATTACH" for a partition, which
+// aren't tables of their own.
+func countListedTables(list string) (tables int, rows bool) {
 	for _, match := range listedTable.FindAllStringSubmatch(list, -1) {
-		if match[1] != "DATA" && match[1] != "ATTACH" {
-			total++
+		switch match[1] {
+		case "DATA":
+			rows = true
+		case "ATTACH":
+		default:
+			tables++
 		}
 	}
-	return total
+	return tables, rows
 }
 
 // Verify proves a backup can be used: it restores it into a throwaway sandbox,
@@ -103,7 +110,8 @@ func readBack(ctx context.Context, list *exec.Cmd, backup, dsn string, skipped S
 	if err != nil {
 		return Report{}, err
 	}
-	return Report{ListedTables: countListedTables(contents.String()), Counts: counts, Ignored: skipped.Count, FirstError: skipped.First}, nil
+	tables, rows := countListedTables(contents.String())
+	return Report{ListedTables: tables, Counts: counts, Ignored: skipped.Count, FirstError: skipped.First, SchemaOnly: tables > 0 && !rows}, nil
 }
 
 // TableCounts returns the exact rows in every table, by schema-qualified name.

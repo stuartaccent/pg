@@ -328,7 +328,10 @@ templ BackupsBody(service, database string, canRestore bool, dir string, files [
 	<div class="flex items-center justify-between gap-2">
 		<h3 class="font-medium">Backups</h3>
 		if service != "" {
-			<button type="button" class="btn btn-primary btn-sm" hx-post="/backup" hx-target="#job" onclick="document.querySelector('#backups').close()">Back up { service }</button>
+			<div class="flex gap-2">
+				<button type="button" class="btn btn-soft btn-sm" hx-post="/backup" hx-vals='{"schema":"1"}' hx-target="#job" title="Tables, functions and so on, without their rows: quick, and enough to compare schemas" onclick="document.querySelector('#backups').close()">Back up schema</button>
+				<button type="button" class="btn btn-primary btn-sm" hx-post="/backup" hx-target="#job" onclick="document.querySelector('#backups').close()">Back up { service }</button>
+			</div>
 		} else {
 			<span class="text-base-content/60 text-sm">Connect to a service to back it up.</span>
 		}
@@ -349,7 +352,7 @@ templ BackupsBody(service, database string, canRestore bool, dir string, files [
 				<button type="button" class="btn btn-soft btn-xs shrink-0" hx-post="/sandboxes" hx-vals={ fileValues(f.Name) } hx-target="#job" onclick="document.querySelector('#backups').close()">Sandbox</button>
 				if canRestore {
 					<button type="button" class="btn btn-soft btn-xs shrink-0" data-file={ f.Name } data-name={ dockerpg.RestoreName(f.Name, time.Now()) } data-service={ service } onclick="showRestore(this)">Restore</button>
-					if database != "" {
+					if database != "" && !strings.HasSuffix(f.Name, schemaSuffix) {
 						<button type="button" class="btn btn-soft btn-warning btn-xs shrink-0" data-file={ f.Name } data-database={ database } data-other={ fmt.Sprint(!dockerpg.SameDatabase(f.Name, database)) } onclick="showReplace(this)">Replace</button>
 					}
 				}

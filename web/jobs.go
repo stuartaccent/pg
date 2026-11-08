@@ -225,19 +225,32 @@ func (s *Server) backup(w http.ResponseWriter, r *http.Request) {
 		render(w, r, JobStatus(jobView{Label: "Backup", Err: errors.New("connect to a service first")}))
 		return
 	}
-	s.startAndRender(w, r, "Backing up "+service, func(ctx context.Context, progress func(string)) (jobResult, error) {
-		saved, err := saveBackup(ctx, settings, image, progress)
+	schema := r.FormValue("schema") != ""
+	label := "Backing up " + service
+	if schema {
+		label = "Backing up the schema of " + service
+	}
+	s.startAndRender(w, r, label, func(ctx context.Context, progress func(string)) (jobResult, error) {
+		saved, err := saveBackup(ctx, settings, image, schema, progress)
 		return jobResult{Text: saved}, err
 	})
 }
 
-func saveBackup(ctx context.Context, settings conn.Settings, image string, progress func(string)) (string, error) {
+// schemaSuffix ends the name of a backup without rows, so the Backups dialog
+// can leave out Replace. Replace checks the file itself as well.
+const schemaSuffix = "-schema.backup"
+
+func saveBackup(ctx context.Context, settings conn.Settings, image string, schema bool, progress func(string)) (string, error) {
 	dir, err := backupDir()
 	if err != nil {
 		return "", err
 	}
-	dest := filepath.Join(dir, dockerpg.BackupName(settings.Database, image, time.Now()))
-	if err := dockerpg.Backup(ctx, settings, image, dest, progress); err != nil {
+	name := dockerpg.BackupName(settings.Database, image, time.Now())
+	if schema {
+		name = strings.TrimSuffix(name, ".backup") + schemaSuffix
+	}
+	dest := filepath.Join(dir, name)
+	if err := dockerpg.Backup(ctx, settings, image, dest, schema, progress); err != nil {
 		return "", err
 	}
 	return "Saved " + filepath.Base(dest), nil
@@ -308,6 +321,9 @@ func (s *Server) verifyBackup(w http.ResponseWriter, r *http.Request) {
 		}
 		if problem := report.Problem(); problem != "" {
 			return jobResult{}, errors.New(problem)
+		}
+		if report.SchemaOnly {
+			return jobResult{Text: fmt.Sprintf("Verified %s: schema only, %d tables.", name, len(report.Counts))}, nil
 		}
 		summary := fmt.Sprintf("Verified %s: %d tables, %d rows.", name, len(report.Counts), report.Rows())
 		if connect == nil {

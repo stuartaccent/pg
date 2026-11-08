@@ -1023,6 +1023,17 @@ func TestReplaceButton(t *testing.T) {
 	if body := get(t, s, http.MethodGet, "/backups").Body.String(); strings.Contains(body, ">Replace<") {
 		t.Error("offered replacing on a read-only service")
 	}
+	s.readOnly = false
+	if err := os.Rename(filepath.Join(dir, "a.backup"), filepath.Join(dir, "live-pg18-20261108-101500"+schemaSuffix)); err != nil {
+		t.Fatal(err)
+	}
+	body := get(t, s, http.MethodGet, "/backups").Body.String()
+	if strings.Contains(body, ">Replace<") {
+		t.Error("offered replacing with a schema-only backup")
+	}
+	if !strings.Contains(body, ">Restore<") || !strings.Contains(body, ">Back up schema<") {
+		t.Error("schema-only backup missing Restore, or no schema button")
+	}
 }
 
 func TestStopArrivingTooLateKeepsTheResult(t *testing.T) {

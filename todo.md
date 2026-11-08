@@ -126,6 +126,7 @@ Built along the way, outside the lists above.
 ### Backups
 
 - [x] Back up through Docker, using the image matching the server.
+- [x] Back up the schema alone, to compare schemas quickly; Replace refuses such a backup.
 - [x] Sandboxes: restore a backup into a throwaway container and connect to it, with a badge to show it's not the real thing.
 - [x] Link to open the backups folder in Finder.
 - [x] Verify a backup: restore it into a throwaway container, check every table arrived, and compare row counts.

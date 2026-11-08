@@ -122,7 +122,7 @@ func TestBackupThenSandbox(t *testing.T) {
 	}
 	dest := filepath.Join(dir, BackupName("sandbox", image, time.Now()))
 	var lines int
-	if err := Backup(ctx, s, image, dest, func(string) { lines++ }); err != nil {
+	if err := Backup(ctx, s, image, dest, false, func(string) { lines++ }); err != nil {
 		t.Fatal(err)
 	}
 	info, err := os.Stat(dest)
@@ -179,7 +179,7 @@ func TestFailedBackupLeavesNothing(t *testing.T) {
 	_, image := settings(t)
 	dest := filepath.Join(t.TempDir(), "x.backup")
 	bad := conn.Settings{Host: "127.0.0.1", Port: 1, User: "nobody", Database: "nothing"}
-	if err := Backup(context.Background(), bad, image, dest, func(string) {}); err == nil {
+	if err := Backup(context.Background(), bad, image, dest, false, func(string) {}); err == nil {
 		t.Fatal("want an error")
 	}
 	files, _ := filepath.Glob(filepath.Join(filepath.Dir(dest), "*"))
@@ -239,8 +239,14 @@ func TestCountListedTables(t *testing.T) {
 218; 1259 16399 TABLE public DATA postgres
 3100; 0 0 TABLE ATTACH public parted_low postgres
 `
-	if got := countListedTables(list); got != 3 {
-		t.Errorf("got %d, want 3", got)
+	if tables, rows := countListedTables(list); tables != 3 || !rows {
+		t.Errorf("got %d, %v, want 3 with rows", tables, rows)
+	}
+	schemaOnly := strings.Join(slices.DeleteFunc(strings.Split(list, "\n"), func(line string) bool {
+		return strings.Contains(line, "TABLE DATA")
+	}), "\n")
+	if tables, rows := countListedTables(schemaOnly); tables != 3 || rows {
+		t.Errorf("schema only: got %d, %v", tables, rows)
 	}
 }
 
@@ -319,7 +325,7 @@ func TestVerify(t *testing.T) {
 	}
 	dir := t.TempDir()
 	dest := filepath.Join(dir, BackupName("sandbox", image, time.Now()))
-	if err := Backup(ctx, s, image, dest, quiet); err != nil {
+	if err := Backup(ctx, s, image, dest, false, quiet); err != nil {
 		t.Fatal(err)
 	}
 
@@ -336,6 +342,22 @@ func TestVerify(t *testing.T) {
 	}
 	if report.Counts["public.kept"] != 3 || report.Counts[`public."Empty one"`] != 0 {
 		t.Errorf("counts = %+v", report.Counts)
+	}
+	if report.SchemaOnly {
+		t.Error("a full backup came out as schema only")
+	}
+
+	// Without rows, every table still arrives, empty.
+	schema := filepath.Join(dir, "schema.backup")
+	if err := Backup(ctx, s, image, schema, true, quiet); err != nil {
+		t.Fatal(err)
+	}
+	schemaReport, err := Verify(ctx, image, schema, quiet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if schemaReport.Problem() != "" || !schemaReport.SchemaOnly || schemaReport.ListedTables != 4 || schemaReport.Rows() != 0 {
+		t.Errorf("schema only report = %+v", schemaReport)
 	}
 
 	// Compared with its source, nothing differs until the source changes.
@@ -461,7 +483,7 @@ func TestRestore(t *testing.T) {
 	}
 	dir := t.TempDir()
 	dest := filepath.Join(dir, BackupName("sandbox", image, time.Now()))
-	if err := Backup(ctx, s, image, dest, quiet); err != nil {
+	if err := Backup(ctx, s, image, dest, false, quiet); err != nil {
 		t.Fatal(err)
 	}
 
@@ -611,7 +633,7 @@ func TestReplace(t *testing.T) {
 	}
 	dir := t.TempDir()
 	dest := filepath.Join(dir, BackupName("sandbox", image, time.Now()))
-	if err := Backup(ctx, s, image, dest, quiet); err != nil {
+	if err := Backup(ctx, s, image, dest, false, quiet); err != nil {
 		t.Fatal(err)
 	}
 
@@ -677,6 +699,17 @@ func TestReplace(t *testing.T) {
 	}
 	stillOriginal("after a stop")
 	noTemp("after a stop")
+
+	// Nor does one with no rows, whatever it's called.
+	schema := filepath.Join(dir, "looks-full.backup")
+	if err := Backup(ctx, s, image, schema, true, quiet); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Replace(ctx, target, schema, "live", tick(), quiet); err == nil || !strings.Contains(err.Error(), "no rows") {
+		t.Fatalf("schema only: err = %v", err)
+	}
+	stillOriginal("after a schema-only backup")
+	noTemp("after a schema-only backup")
 
 	// A role missing here is a skipped error, which stops it.
 	query(t, server.DSN(), "revoke all on database live from reader; drop role reader; create role reader2")

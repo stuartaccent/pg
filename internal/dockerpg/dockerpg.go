@@ -137,14 +137,15 @@ func containerHost(host string) string {
 	return host
 }
 
-// Backup dumps a database to dest in pg_dump's custom format. The connection
+// Backup dumps a database to dest in pg_dump's custom format, without its rows
+// if schemaOnly. The connection
 // details go through the environment, so the password stays out of the process
 // list. It's written beside dest and moved there when complete, so a backup
 // that exists is a backup that finished.
 //
 // shortcut: sslmode isn't passed on, so pg_dump uses its default of prefer. Add
 // it if a service ever needs verify-full.
-func Backup(ctx context.Context, s conn.Settings, image, dest string, progress func(string)) error {
+func Backup(ctx context.Context, s conn.Settings, image, dest string, schemaOnly bool, progress func(string)) error {
 	partial := dest + ".partial"
 	f, err := os.OpenFile(partial, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
@@ -159,6 +160,9 @@ func Backup(ctx context.Context, s conn.Settings, image, dest string, progress f
 	}, "run", "--rm", "--init",
 		"-e", "PGHOST", "-e", "PGPORT", "-e", "PGUSER", "-e", "PGPASSWORD", "-e", "PGDATABASE",
 		image, "pg_dump", "--format=custom", "--verbose")
+	if schemaOnly {
+		cmd.Args = append(cmd.Args, "--schema-only")
+	}
 	cmd.Stdout = f
 	last, err := run(cmd, progress)
 	if cerr := f.Close(); err == nil {

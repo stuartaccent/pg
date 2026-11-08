@@ -114,6 +114,10 @@ func Replace(ctx context.Context, t Target, backup, database string, at time.Tim
 	if problem := report.Problem(); problem != "" {
 		return fail(errors.New(problem + ", so " + database + " was left alone"))
 	}
+	// Whatever the file's called: swapping one in would leave every table empty.
+	if report.SchemaOnly {
+		return fail(errors.New(filepath.Base(backup) + " has the schema but no rows, so " + database + " was left alone"))
+	}
 	if err := ctx.Err(); err != nil {
 		return fail(err)
 	}
