@@ -265,7 +265,8 @@ var queries = map[string]string{
 	"constraints": `
 		select conname, pg_get_constraintdef(oid), '', '', '', ''
 		from pg_constraint
-		where conrelid = $1
+		-- Postgres 18 makes each NOT NULL a constraint, which the column already shows.
+		where conrelid = $1 and contype <> 'n'
 		order by 1`,
 	"triggers": `
 		select tgname, pg_get_triggerdef(oid), '', '', '', ''
