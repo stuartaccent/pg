@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -146,7 +147,37 @@ func backupDir() (string, error) {
 
 type backupFile struct {
 	Name, Size string
-	modified   time.Time
+	// From the name, for one of pg's own; otherwise Database is the name and
+	// taken is when the file was last changed.
+	Database, Version string
+	Schema            bool
+	taken             time.Time
+}
+
+// Taken is when the backup was made, with the year only if it isn't this one.
+func (f backupFile) Taken() string {
+	if f.taken.Year() == time.Now().Year() {
+		return f.taken.Format("2 Jan 15:04")
+	}
+	return f.taken.Format("2 Jan 2006 15:04")
+}
+
+// backupNamePattern reads the names dockerpg.BackupName makes, plus the suffix
+// of a schema-only one.
+var backupNamePattern = regexp.MustCompile(`^(.+)-pg(\d+)-(\d{8}-\d{6})(-schema)?\.backup$`)
+
+func newBackupFile(name string, size int64, modified time.Time) backupFile {
+	f := backupFile{Name: name, Size: humanSize(size), Database: strings.TrimSuffix(name, ".backup"), taken: modified}
+	m := backupNamePattern.FindStringSubmatch(name)
+	if m == nil {
+		return f
+	}
+	at, err := time.ParseInLocation("20060102-150405", m[3], time.Local)
+	if err != nil {
+		return f
+	}
+	f.Database, f.Version, f.taken, f.Schema = m[1], "pg"+m[2], at, m[4] != ""
+	return f
 }
 
 // listBackups returns the backups in dir, newest first.
@@ -161,9 +192,9 @@ func listBackups(dir string) ([]backupFile, error) {
 		if err != nil || !info.Mode().IsRegular() || filepath.Ext(e.Name()) != ".backup" {
 			continue
 		}
-		files = append(files, backupFile{Name: e.Name(), Size: humanSize(info.Size()), modified: info.ModTime()})
+		files = append(files, newBackupFile(e.Name(), info.Size(), info.ModTime()))
 	}
-	slices.SortFunc(files, func(a, b backupFile) int { return cmp.Compare(b.modified.UnixNano(), a.modified.UnixNano()) })
+	slices.SortFunc(files, func(a, b backupFile) int { return cmp.Compare(b.taken.UnixNano(), a.taken.UnixNano()) })
 	return files, nil
 }
 

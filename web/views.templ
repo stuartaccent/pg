@@ -328,10 +328,20 @@ templ BackupsBody(service, database string, canRestore bool, dir string, files [
 	<div class="flex items-center justify-between gap-2">
 		<h3 class="font-medium">Backups</h3>
 		if service != "" {
-			<div class="flex gap-2">
-				<button type="button" class="btn btn-soft btn-sm" hx-post="/backup" hx-vals='{"schema":"1"}' hx-target="#job" title="Tables, functions and so on, without their rows: quick, and enough to compare schemas" onclick="document.querySelector('#backups').close()">Back up schema</button>
-				<button type="button" class="btn btn-primary btn-sm" hx-post="/backup" hx-target="#job" onclick="document.querySelector('#backups').close()">Back up { service }</button>
+			<div class="join">
+				<button type="button" class="btn btn-primary btn-sm join-item" hx-post="/backup" hx-target="#job" onclick="document.querySelector('#backups').close()">Back up { service }</button>
+				<button type="button" class="btn btn-primary btn-sm join-item px-2" popovertarget="backup-kinds" style="anchor-name:--backup-kinds" aria-label="Other kinds of backup">▾</button>
 			</div>
+			<ul popover id="backup-kinds" style="position-anchor:--backup-kinds" class="dropdown dropdown-end menu w-64 rounded-box bg-base-200 shadow-md">
+				<li>
+					<button type="button" hx-post="/backup" hx-vals='{"schema":"1"}' hx-target="#job" onclick="this.closest('[popover]').hidePopover(); document.querySelector('#backups').close()">
+						<span>
+							Schema only
+							<span class="block text-xs text-base-content/60">No rows: quick, and enough to compare schemas</span>
+						</span>
+					</button>
+				</li>
+			</ul>
 		} else {
 			<span class="text-base-content/60 text-sm">Connect to a service to back it up.</span>
 		}
@@ -340,39 +350,102 @@ templ BackupsBody(service, database string, canRestore bool, dir string, files [
 		<p class="text-error mt-2">{ err.Error() }</p>
 	}
 	<button type="button" class="link link-hover text-base-content/60 text-xs mt-1 cursor-pointer" title="Open in Finder. Anything ending .backup here is listed." hx-post="/backups/open" hx-target="#backups-body">{ dir }</button>
-	<ul class="mt-2 max-h-[40vh] overflow-auto">
-		if len(files) == 0 {
-			<li class="text-base-content/50 text-sm py-1">No backups yet.</li>
-		}
-		for _, f := range files {
-			<li class="flex items-center gap-2 py-1">
-				<span class="min-w-0 flex-1 truncate font-mono text-xs" title={ f.Name }>{ f.Name }</span>
-				<span class="text-base-content/50 shrink-0 text-xs">{ f.Size }</span>
-				<button type="button" class="btn btn-soft btn-xs shrink-0" hx-post="/backups/verify" hx-vals={ fileValues(f.Name) } hx-target="#job" onclick="document.querySelector('#backups').close()">Verify</button>
-				<button type="button" class="btn btn-soft btn-xs shrink-0" hx-post="/sandboxes" hx-vals={ fileValues(f.Name) } hx-target="#job" onclick="document.querySelector('#backups').close()">Sandbox</button>
-				if canRestore {
-					<button type="button" class="btn btn-soft btn-xs shrink-0" data-file={ f.Name } data-name={ dockerpg.RestoreName(f.Name, time.Now()) } data-service={ service } onclick="showRestore(this)">Restore</button>
-					if database != "" && !strings.HasSuffix(f.Name, schemaSuffix) {
-						<button type="button" class="btn btn-soft btn-warning btn-xs shrink-0" data-file={ f.Name } data-database={ database } data-other={ fmt.Sprint(!dockerpg.SameDatabase(f.Name, database)) } onclick="showReplace(this)">Replace</button>
+	if len(files) == 0 {
+		<p class="text-base-content/50 text-sm mt-2">No backups yet.</p>
+	} else {
+		<!-- Menus are popovers, so this scrolling doesn't cut them off. -->
+		<div class="mt-2 max-h-[40vh] overflow-auto">
+			<table class="table table-sm [&_tr>:first-child]:pl-0 [&_tr>:last-child]:pr-0">
+				<thead>
+					<tr>
+						<th>Database</th>
+						<th>Version</th>
+						<th>Taken</th>
+						<th class="text-right">Size</th>
+						<th></th>
+					</tr>
+				</thead>
+				<tbody>
+					for i, f := range files {
+						<tr title={ f.Name }>
+							<td class="font-mono text-xs">
+								<div class="flex items-center gap-2 max-w-80">
+									<span class="truncate">{ f.Database }</span>
+									if f.Schema {
+										<span class="badge badge-info badge-xs shrink-0">schema</span>
+									}
+								</div>
+							</td>
+							<td class="text-xs">{ f.Version }</td>
+							<td class="text-xs whitespace-nowrap">{ f.Taken() }</td>
+							<td class="text-xs text-right whitespace-nowrap text-base-content/60">{ f.Size }</td>
+							<td class="text-right whitespace-nowrap">
+								<button type="button" class="btn btn-soft btn-xs" hx-post="/sandboxes" hx-vals={ fileValues(f.Name) } hx-target="#job" onclick="document.querySelector('#backups').close()">Sandbox</button>
+								@backupMenu(fmt.Sprintf("backup-menu-%d", i), f, service, database, canRestore)
+							</td>
+						</tr>
 					}
-				}
-				<button type="button" class="btn btn-soft btn-error btn-xs shrink-0" hx-post="/backups/delete" hx-vals={ fileValues(f.Name) } hx-target="#backups-body" data-confirm={ "Delete " + f.Name + " for good? It won't go to the Trash." } aria-label={ "Delete " + f.Name }>Delete</button>
-			</li>
-		}
-	</ul>
+				</tbody>
+			</table>
+		</div>
+	}
 	if len(sandboxes) > 0 {
 		<h3 class="font-medium mt-4">Sandboxes</h3>
 		<p class="text-base-content/60 text-xs mt-1">Copies of real data, running in Docker until removed. Pick one from the service list to use it.</p>
-		<ul class="mt-2">
-			for _, sb := range sandboxes {
-				<li class="flex items-center gap-2 py-1">
-					<span class="font-mono text-xs shrink-0">{ sb.Name }</span>
-					<span class="min-w-0 flex-1 truncate text-base-content/50 text-xs" title={ sb.Source }>{ sb.Source }</span>
-					<button type="button" class="btn btn-soft btn-error btn-xs shrink-0" hx-post={ "/sandboxes/" + sb.Name + "/remove" } hx-target="#backups-body">Remove</button>
-				</li>
-			}
-		</ul>
+		<table class="table table-sm mt-2 [&_tr>:first-child]:pl-0 [&_tr>:last-child]:pr-0">
+			<thead>
+				<tr>
+					<th>Sandbox</th>
+					<th>From</th>
+					<th>Taken</th>
+					<th></th>
+				</tr>
+			</thead>
+			<tbody>
+				for _, sb := range sandboxes {
+					{{ from := newBackupFile(sb.Source, 0, time.Time{}) }}
+					<tr title={ sb.Source }>
+						<td class="font-mono text-xs whitespace-nowrap">{ sb.Name }</td>
+						<td class="font-mono text-xs">
+							<div class="flex items-center gap-2 max-w-80">
+								<span class="truncate">{ from.Database }</span>
+								if from.Version != "" {
+									<span class="text-base-content/60 shrink-0">{ from.Version }</span>
+								}
+								if from.Schema {
+									<span class="badge badge-info badge-xs shrink-0">schema</span>
+								}
+							</div>
+						</td>
+						<td class="text-xs whitespace-nowrap">
+							if from.Version != "" {
+								{ from.Taken() }
+							}
+						</td>
+						<td class="text-right">
+							<button type="button" class="btn btn-soft btn-error btn-xs" hx-post={ "/sandboxes/" + sb.Name + "/remove" } hx-target="#backups-body">Remove</button>
+						</td>
+					</tr>
+				}
+			</tbody>
+		</table>
 	}
+}
+
+// backupMenu holds a backup's less common actions, including the ones that
+// change or delete something, a click away from a slip.
+templ backupMenu(id string, f backupFile, service, database string, canRestore bool) {
+	<button type="button" class="btn btn-ghost btn-xs" popovertarget={ id } style={ templ.SafeCSS("anchor-name:--" + id) } aria-label={ "More for " + f.Name }>⋯</button>
+	<ul popover id={ id } style={ templ.SafeCSS("position-anchor:--" + id) } class="dropdown dropdown-end menu w-36 rounded-box bg-base-200 shadow-md text-left">
+		<li><button type="button" hx-post="/backups/verify" hx-vals={ fileValues(f.Name) } hx-target="#job" onclick="this.closest('[popover]').hidePopover(); document.querySelector('#backups').close()">Verify</button></li>
+		if canRestore {
+			<li><button type="button" data-file={ f.Name } data-name={ dockerpg.RestoreName(f.Name, time.Now()) } data-service={ service } onclick="this.closest('[popover]').hidePopover(); showRestore(this)">Restore</button></li>
+			if database != "" && !f.Schema {
+				<li><button type="button" class="text-warning" data-file={ f.Name } data-database={ database } data-other={ fmt.Sprint(!dockerpg.SameDatabase(f.Name, database)) } onclick="this.closest('[popover]').hidePopover(); showReplace(this)">Replace</button></li>
+			}
+		}
+		<li><button type="button" class="text-error" hx-post="/backups/delete" hx-vals={ fileValues(f.Name) } hx-target="#backups-body" data-confirm={ "Delete " + f.Name + " for good? It won't go to the Trash." } onclick="this.closest('[popover]').hidePopover()">Delete</button></li>
+	</ul>
 }
 
 // QueriesBody is the Queries dialog's content.

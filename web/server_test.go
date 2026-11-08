@@ -21,6 +21,7 @@ import (
 
 	"pg/internal/catalog"
 	"pg/internal/conn"
+	"pg/internal/dockerpg"
 	"pg/internal/session"
 )
 
@@ -871,7 +872,8 @@ func TestDeleteBackup(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "a.backup")); !os.IsNotExist(err) {
 		t.Errorf("a.backup still there: %v", err)
 	}
-	if strings.Contains(body, "a.backup") || !strings.Contains(body, "b.backup") {
+	// By the row's title, as a running sandbox's source could end in "a.backup".
+	if strings.Contains(body, `title="a.backup"`) || !strings.Contains(body, `title="b.backup"`) {
 		t.Errorf("list not refreshed: %q", body)
 	}
 
@@ -1031,7 +1033,7 @@ func TestReplaceButton(t *testing.T) {
 	if strings.Contains(body, ">Replace<") {
 		t.Error("offered replacing with a schema-only backup")
 	}
-	if !strings.Contains(body, ">Restore<") || !strings.Contains(body, ">Back up schema<") {
+	if !strings.Contains(body, ">Restore<") || !strings.Contains(body, "Schema only") {
 		t.Error("schema-only backup missing Restore, or no schema button")
 	}
 }
@@ -1152,5 +1154,46 @@ func TestWhatTheWarningsDependOn(t *testing.T) {
 	}
 	if !strings.Contains(string(js), "form[hx-post='/query']") {
 		t.Error("app.js no longer looks for the query form")
+	}
+}
+
+func TestNewBackupFile(t *testing.T) {
+	modified := time.Date(2025, 3, 1, 9, 0, 0, 0, time.Local)
+	for _, tt := range []struct {
+		name, database, version string
+		schema                  bool
+		taken                   time.Time
+	}{
+		{"shop-db-next-pg17-20261106-121921.backup", "shop-db-next", "pg17", false, time.Date(2026, 11, 6, 12, 19, 21, 0, time.Local)},
+		{"shop_db_next-pg18-20261108-160642-schema.backup", "shop_db_next", "pg18", true, time.Date(2026, 11, 8, 16, 6, 42, 0, time.Local)},
+		{"other_app.backup", "other_app", "", false, modified},
+		{"x-pg18-2026-schema.backup", "x-pg18-2026-schema", "", false, modified},
+	} {
+		f := newBackupFile(tt.name, 1536, modified)
+		if f.Database != tt.database || f.Version != tt.version || f.Schema != tt.schema || !f.taken.Equal(tt.taken) || f.Size != "1.5 KB" {
+			t.Errorf("%s: got %+v", tt.name, f)
+		}
+	}
+	if got := (backupFile{taken: time.Date(2025, 3, 1, 9, 5, 0, 0, time.Local)}).Taken(); got != "1 Mar 2025 09:05" {
+		t.Errorf("last year = %q", got)
+	}
+	if got := (backupFile{taken: time.Date(time.Now().Year(), 3, 1, 9, 5, 0, 0, time.Local)}).Taken(); got != "1 Mar 09:05" {
+		t.Errorf("this year = %q", got)
+	}
+}
+
+func TestSandboxesTable(t *testing.T) {
+	var b bytes.Buffer
+	sandboxes := []dockerpg.Sandbox{
+		{Name: "pg-sandbox-a1", Source: "shop_db-pg17-20261106-074224-schema.backup"},
+		{Name: "pg-sandbox-b2", Source: "other_app.backup"},
+	}
+	if err := BackupsBody("", "", false, "/tmp", nil, sandboxes, nil).Render(context.Background(), &b); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"pg-sandbox-a1", ">shop_db", ">pg17<", ">schema<", "6 Nov", "other_app", "/sandboxes/pg-sandbox-b2/remove"} {
+		if !strings.Contains(b.String(), want) {
+			t.Errorf("missing %s", want)
+		}
 	}
 }
