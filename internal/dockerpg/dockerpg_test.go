@@ -807,3 +807,13 @@ func namedSandbox(t *testing.T, image, name string) (Sandbox, func()) {
 	}
 	return sb, func() { _ = Remove(ctx, sb.Name) }
 }
+
+func TestSandboxURL(t *testing.T) {
+	sb := Sandbox{Port: 54012, Password: "ab12"}
+	if got := sb.URL(); got != "postgresql://postgres:ab12@127.0.0.1:54012/sandbox" {
+		t.Errorf("url = %q", got)
+	}
+	if sb.Database() != "sandbox" {
+		t.Errorf("database = %q", sb.Database())
+	}
+}

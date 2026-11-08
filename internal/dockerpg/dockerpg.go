@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -189,6 +190,15 @@ func IsSandbox(name string) bool {
 }
 
 // DSN returns how to connect to it.
+// URL is how other programs can connect to it, from this machine only.
+func (s Sandbox) URL() string {
+	u := url.URL{Scheme: "postgresql", User: url.UserPassword("postgres", s.Password), Host: fmt.Sprintf("127.0.0.1:%d", s.Port), Path: "/" + sandboxDB}
+	return u.String()
+}
+
+// Database is the name of the database a sandbox holds the backup in.
+func (Sandbox) Database() string { return sandboxDB }
+
 func (s Sandbox) DSN() string {
 	return fmt.Sprintf("host=127.0.0.1 port=%d user=postgres password=%s dbname=%s sslmode=disable", s.Port, s.Password, sandboxDB)
 }

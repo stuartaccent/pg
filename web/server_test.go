@@ -1185,13 +1185,14 @@ func TestNewBackupFile(t *testing.T) {
 func TestSandboxesTable(t *testing.T) {
 	var b bytes.Buffer
 	sandboxes := []dockerpg.Sandbox{
-		{Name: "pg-sandbox-a1", Source: "shop_db-pg17-20261106-074224-schema.backup"},
+		{Name: "pg-sandbox-a1", Source: "shop_db-pg17-20261106-074224-schema.backup", Port: 54012, Password: "ab12"},
 		{Name: "pg-sandbox-b2", Source: "other_app.backup"},
 	}
 	if err := BackupsBody("", "", false, "/tmp", nil, sandboxes, nil).Render(context.Background(), &b); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"pg-sandbox-a1", ">shop_db", ">pg17<", ">schema<", "6 Nov", "other_app", "/sandboxes/pg-sandbox-b2/remove"} {
+	for _, want := range []string{"pg-sandbox-a1", ">shop_db", ">pg17<", ">schema<", "6 Nov", "other_app", "/sandboxes/pg-sandbox-b2/remove",
+		`popovertarget="connect-pg-sandbox-a1"`, ">54012<", ">ab12<", "postgresql://postgres:ab12@127.0.0.1:54012/sandbox"} {
 		if !strings.Contains(b.String(), want) {
 			t.Errorf("missing %s", want)
 		}

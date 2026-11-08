@@ -456,6 +456,7 @@ const cellValue = (td) => (td.hasAttribute("data-null") ? "" : td.textContent);
 
 const copyCell = (button, wholeRow) => copy(button, wholeRow ? [...openCell.parentElement.cells].map(cellValue).join("\t") : cellValue(openCell));
 const copyPlan = (button) => copy(button, button.dataset.plan);
+const copyFrom = (button) => copy(button, button.dataset.copy);
 
 async function copy(button, text) {
 	let copied = true;
@@ -551,7 +552,7 @@ document.addEventListener("keydown", (event) => {
 	resize(bar, sizeOf(bar) + step);
 });
 
-Object.assign(window, { fromMenu, newTab, closeActiveTab, selectTab, closeTab, closeAllTabs, useSQL, useDefinition, resetTree, formatSQL, showHistory, showQueries, useQuery, openQueryFile, saveQuery, showActivity, showHealth, activityLive, showBackups, showRestore, closeRestore, showReplace, checkReplace, closeReplace, renderHistory, copyCell, copyPlan });
+Object.assign(window, { fromMenu, newTab, closeActiveTab, selectTab, closeTab, closeAllTabs, useSQL, useDefinition, resetTree, formatSQL, showHistory, showQueries, useQuery, openQueryFile, saveQuery, showActivity, showHealth, activityLive, showBackups, showRestore, closeRestore, showReplace, checkReplace, closeReplace, renderHistory, copyCell, copyPlan, copyFrom });
 
 // Wails holds back the menu's commands until its runtime says the page is ready.
 // This page doesn't load that runtime, so it says so itself.

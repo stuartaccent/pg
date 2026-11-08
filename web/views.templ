@@ -422,7 +422,8 @@ templ BackupsBody(service, database string, canRestore bool, dir string, files [
 								{ from.Taken() }
 							}
 						</td>
-						<td class="text-right">
+						<td class="text-right whitespace-nowrap">
+							@sandboxConnect(sb)
 							<button type="button" class="btn btn-soft btn-error btn-xs" hx-post={ "/sandboxes/" + sb.Name + "/remove" } hx-target="#backups-body">Remove</button>
 						</td>
 					</tr>
@@ -430,6 +431,29 @@ templ BackupsBody(service, database string, canRestore bool, dir string, files [
 			</tbody>
 		</table>
 	}
+}
+
+// sandboxConnect shows how to reach a sandbox from other programs, such as
+// psql or pgAdmin. pg itself finds them in Docker.
+templ sandboxConnect(sb dockerpg.Sandbox) {
+	{{ id := "connect-" + sb.Name }}
+	<button type="button" class="btn btn-soft btn-xs" popovertarget={ id } style={ templ.SafeCSS("anchor-name:--" + id) }>Connect</button>
+	<div popover id={ id } style={ templ.SafeCSS("position-anchor:--" + id) } class="dropdown dropdown-end w-80 rounded-box bg-base-200 shadow-md p-3 text-left">
+		<dl class="grid grid-cols-[auto_1fr_auto] items-center gap-x-3 gap-y-1 text-xs">
+			@connectField("Host", "127.0.0.1")
+			@connectField("Port", fmt.Sprint(sb.Port))
+			@connectField("Database", sb.Database())
+			@connectField("User", "postgres")
+			@connectField("Password", sb.Password)
+		</dl>
+		<button type="button" class="btn btn-soft btn-xs w-full mt-3" data-copy={ sb.URL() } onclick="copyFrom(this)">Copy URL</button>
+	</div>
+}
+
+templ connectField(name, value string) {
+	<dt class="text-base-content/60">{ name }</dt>
+	<dd class="font-mono truncate select-all" title={ value }>{ value }</dd>
+	<button type="button" class="btn btn-ghost btn-xs" data-copy={ value } onclick="copyFrom(this)" aria-label={ "Copy " + name }>Copy</button>
 }
 
 // backupMenu holds a backup's less common actions, including the ones that
