@@ -138,12 +138,12 @@ func TestStartersOnlyArriveOnce(t *testing.T) {
 	t.Setenv("HOME", home)
 	s := New()
 	body := get(t, s, http.MethodGet, "/queries").Body.String()
-	for _, want := range []string{"Create role", "Table sizes", "Unused indexes", "Cache hit rate", "Long-running queries"} {
+	for _, want := range []string{"Create role", "Server/Overview", "Activity/Long-running queries", "Tables/Cache hit rate", "Tables/Table sizes"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("%q not listed", want)
 		}
 	}
-	if err := os.Remove(filepath.Join(home, "pg-queries", "Table sizes.sql")); err != nil {
+	if err := os.Remove(filepath.Join(home, "pg-queries", "Tables", "Table sizes.sql")); err != nil {
 		t.Fatal(err)
 	}
 	if body := get(t, s, http.MethodGet, "/queries").Body.String(); strings.Contains(body, "Table sizes") {
@@ -234,7 +234,7 @@ func TestQueriesInSubfolders(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Contains(got, "stats/deep/Sizes") || !slices.Contains(got, "Table sizes") {
+	if !slices.Contains(got, "stats/deep/Sizes") || !slices.Contains(got, "Tables/Table sizes") {
 		t.Errorf("list = %q", got)
 	}
 	if slices.ContainsFunc(got, func(name string) bool { return strings.Contains(name, "inside") }) {
@@ -398,8 +398,14 @@ func TestStartersRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	database := string(res[0].Rows[0][0])
-	files, err := fs.Glob(starters, "starters/*.sql")
-	if err != nil || len(files) == 0 {
+	var files []string
+	err = fs.WalkDir(starters, "starters", func(path string, d fs.DirEntry, err error) error {
+		if err == nil && !d.IsDir() {
+			files = append(files, path)
+		}
+		return err
+	})
+	if err != nil || len(files) < 14 {
 		t.Fatalf("starters: %v, %v", files, err)
 	}
 	for _, file := range files {
@@ -409,6 +415,12 @@ func TestStartersRun(t *testing.T) {
 		}
 		sql := strings.ReplaceAll(string(text), "on database mydb", `on database "`+database+`"`)
 		_, err = c.Exec(ctx, "begin; "+sql+"; rollback").ReadAll()
+		// Slowest queries needs an extension the test server may not have.
+		if err != nil && strings.Contains(file, "Slowest") && strings.Contains(err.Error(), "pg_stat_statements") {
+			t.Logf("%s: %v", file, err)
+			_, _ = c.Exec(ctx, "rollback").ReadAll()
+			continue
+		}
 		if err != nil {
 			t.Errorf("%s: %v", file, err)
 			_, _ = c.Exec(ctx, "rollback").ReadAll()
