@@ -26,6 +26,7 @@ import (
 	"pg/internal/catalog"
 	"pg/internal/conn"
 	"pg/internal/dockerpg"
+	"pg/internal/history"
 	"pg/internal/session"
 )
 
@@ -56,6 +57,7 @@ type Server struct {
 	lastTab  int                                           // guarded by mu
 	job      *job                                          // guarded by mu; the latest one
 	exportTo map[string]string                             // guarded by mu; where a tab's export was told to go
+	hist     *history.Store                                // guarded by mu; nil until first used
 }
 
 func New() *Server {
@@ -87,6 +89,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /query/{id}/more", s.more)
 	mux.HandleFunc("POST /cancel", s.cancel)
 	mux.HandleFunc("POST /check", s.check)
+	mux.HandleFunc("GET /history", s.showHistory)
+	mux.HandleFunc("GET /history/list", s.listHistory)
+	mux.HandleFunc("GET /history/{id}", s.historyDetail)
+	mux.HandleFunc("POST /history/{id}/star", s.starHistory)
+	mux.HandleFunc("POST /history/{id}/note", s.noteHistory)
+	mux.HandleFunc("DELETE /history/{id}", s.removeHistory)
+	mux.HandleFunc("POST /history/clear", s.clearHistory)
 	mux.HandleFunc("POST /export/choose", s.chooseExport)
 	mux.HandleFunc("POST /export", s.export)
 	mux.HandleFunc("GET /tree", s.tree)
@@ -131,6 +140,12 @@ func (s *Server) Close() {
 		}
 	}
 	s.disconnect()
+	s.mu.Lock()
+	if s.hist != nil {
+		_ = s.hist.Close()
+		s.hist = nil
+	}
+	s.mu.Unlock()
 }
 
 // disconnect closes every session and the catalog, and forgets the service.
@@ -340,14 +355,19 @@ func (s *Server) closeTab(w http.ResponseWriter, r *http.Request) {
 func (s *Server) query(w http.ResponseWriter, r *http.Request) {
 	tab := r.FormValue("tab")
 	sess := s.session(tab)
-	switch {
-	case sess == nil:
+	if sess == nil {
 		render(w, r, Results(session.Page{Done: true, Err: errors.New("connect to a service first")}, tab))
-	case r.FormValue("explain") != "":
-		render(w, r, Results(sess.Explain(r.FormValue("sql"), r.FormValue("explain") == "analyze"), tab))
-	default:
-		render(w, r, Results(sess.Run(r.FormValue("sql")), tab))
+		return
 	}
+	// As typed, so running it again from History asks for its params again.
+	if typed := r.FormValue("typed"); typed != "" {
+		s.remember(r.Context(), typed, r.FormValue("sql"))
+	}
+	if r.FormValue("explain") != "" {
+		render(w, r, Results(sess.Explain(r.FormValue("sql"), r.FormValue("explain") == "analyze"), tab))
+		return
+	}
+	render(w, r, Results(sess.Run(r.FormValue("sql")), tab))
 }
 
 func (s *Server) more(w http.ResponseWriter, r *http.Request) {
@@ -383,13 +403,10 @@ func (s *Server) cancel(w http.ResponseWriter, r *http.Request) {
 }
 
 // check is what the page asks about sql before running it: whether it writes
-// to every row, and its fingerprint, which History uses to keep one entry per
-// query whatever its values or layout. SQL that doesn't parse gets neither.
+// to every row. SQL that doesn't parse doesn't.
 func (s *Server) check(w http.ResponseWriter, r *http.Request) {
-	sql := r.FormValue("sql")
-	fingerprint, _ := pg_query.Fingerprint(sql)
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{"everyRow": writesEveryRow(sql), "fingerprint": fingerprint})
+	_ = json.NewEncoder(w).Encode(map[string]bool{"everyRow": writesEveryRow(r.FormValue("sql"))})
 }
 
 // writesEveryRow reports whether sql has an update or delete with no where,

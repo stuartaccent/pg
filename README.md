@@ -39,7 +39,7 @@ scripts/bundle.sh                 # builds dist/pg.app
 cp -R dist/pg.app /Applications
 ```
 
-It keeps its own tabs, history and settings, separate from `go run`.
+It keeps its own tabs and settings, separate from `go run`. History is shared by both.
 
 ## Work on the UI
 
@@ -90,7 +90,8 @@ npm test
 - Replace swaps the connected database for a backup, after you type its name. The backup is restored beside it and checked first, keeping owners and grants, so a bad one changes nothing. Then two renames swap them in moments, disconnecting anyone using it, and the previous database stays as `<name>_old_<date>` until you drop it. To undo, rename them back.
 - Click a result cell to read all of it, format JSON and copy it.
 - Export CSV asks where to save in the app, and saves to `~/Downloads` in a browser. It uses a read-only transaction: it runs the query again, so one that writes is refused.
-- Tabs' SQL, history, the last service and pane sizes are kept in the webview's `localStorage`, so history holds whatever you've run.
+- Tabs' SQL, the last service and pane sizes are kept in the webview's `localStorage`.
+- History records every run, in SQLite at `~/Library/Application Support/pg/history.db`. Runs of the same query, whatever its values or layout, make one entry showing the newest text, with every run's time, service and database. Star an entry to keep it first and through clearing, and add a note to find it by.
 
 ## Layout
 

@@ -22,6 +22,7 @@ import (
 	"pg/internal/catalog"
 	"pg/internal/conn"
 	"pg/internal/dockerpg"
+	"pg/internal/history"
 	"pg/internal/session"
 )
 
@@ -1261,10 +1262,7 @@ func TestWritesEveryRow(t *testing.T) {
 
 func TestCheck(t *testing.T) {
 	s := New()
-	check := func(sql string) (got struct {
-		EveryRow    bool
-		Fingerprint string
-	}) {
+	check := func(sql string) (got struct{ EveryRow bool }) {
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest(http.MethodPost, "/check", strings.NewReader(url.Values{"sql": {sql}}.Encode()))
 		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -1274,17 +1272,60 @@ func TestCheck(t *testing.T) {
 		}
 		return got
 	}
-	a, b := check("delete from t where id = 1"), check("DELETE FROM t  WHERE id=2")
-	if a.EveryRow || a.Fingerprint == "" || a.Fingerprint != b.Fingerprint {
-		t.Errorf("same query, different values: %+v, %+v", a, b)
+	if check("delete from t where id = 1").EveryRow || !check("delete from t").EveryRow || check("select :id").EveryRow {
+		t.Error("everyRow is wrong")
 	}
-	if c := check("delete from u where id = 1"); c.Fingerprint == a.Fingerprint {
-		t.Error("a different table has the same fingerprint")
+}
+
+func TestHistoryDialog(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	s := New()
+	t.Cleanup(s.Close)
+	s.service, s.settings.Database = "local", "app"
+	for range history.RecentRuns + 2 {
+		s.remember(context.Background(), "select * from things where id = :id", "select * from things where id = '1'")
 	}
-	if got := check("delete from t"); !got.EveryRow {
-		t.Error("delete from t: want everyRow")
+
+	send := func(method, path string, form url.Values) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(method, path, strings.NewReader(form.Encode()))
+		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		s.Handler().ServeHTTP(w, r)
+		return w
 	}
-	if got := check("select :id"); got.EveryRow || got.Fingerprint != "" {
-		t.Errorf("unparsable: %+v", got)
+	body := send(http.MethodGet, "/history", nil).Body.String()
+	for _, want := range []string{"select * from things where id = :id", "<option>local</option>", `hx-get="/history/1"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("dialog lacks %q", want)
+		}
+	}
+	if body := send(http.MethodGet, "/history/list?q=nothing", nil).Body.String(); !strings.Contains(body, "Nothing found") {
+		t.Errorf("search: %s", body)
+	}
+	if body := send(http.MethodGet, "/history/list?selected=1", nil).Body.String(); !strings.Contains(body, `aria-current="true"`) {
+		t.Errorf("the chosen entry isn't marked: %s", body)
+	}
+
+	w := send(http.MethodPost, "/history/1/star", url.Values{"starred": {"1"}})
+	if w.Code != http.StatusNoContent || w.Header().Get("HX-Trigger") != "history-changed" {
+		t.Fatalf("star: %d %q", w.Code, w.Header().Get("HX-Trigger"))
+	}
+	// The note is already on screen, so the dialog needn't reload to show it.
+	if w := send(http.MethodPost, "/history/1/note", url.Values{"note": {"by id"}}); w.Code != http.StatusNoContent || w.Header().Get("HX-Trigger") != "" {
+		t.Errorf("note: %d %q", w.Code, w.Header().Get("HX-Trigger"))
+	}
+	body = send(http.MethodGet, "/history/1", nil).Body.String()
+	for _, want := range []string{"★", "by id", "<td>app</td>", "and 2 earlier runs"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("detail lacks %q", want)
+		}
+	}
+
+	if w := send(http.MethodPost, "/history/clear", url.Values{"days": {"soon"}}); w.Code != http.StatusBadRequest {
+		t.Errorf("bad days: %d", w.Code)
+	}
+	send(http.MethodDelete, "/history/1", nil)
+	if body := send(http.MethodGet, "/history/1", nil).Body.String(); !strings.Contains(body, "no longer in history") {
+		t.Errorf("after remove: %s", body)
 	}
 }

@@ -15,8 +15,6 @@ const views = new Map(); // tab id to its editor
 const language = new Compartment();
 let completions = {};
 let activeTab;
-const MAX_HISTORY = 2000;
-const MAX_HISTORY_CHARS = 2_000_000; // localStorage holds about 5MB, and tabs' SQL must still fit
 const MIN_PANE = 80; // the smallest a dragged pane gets; what's beside it keeps twice this, as it holds the buttons too
 
 const sqlLanguage = () => sql({ dialect: PostgreSQL, schema: completions.schemas ?? {}, defaultSchema: completions.defaultSchema || undefined });
@@ -251,19 +249,8 @@ function formatSQL() {
 	}
 }
 
-// Entries were once just the SQL, before they had fingerprints.
-const loadHistory = () => JSON.parse(localStorage.getItem("history") ?? "[]").map((entry) => (typeof entry === "string" ? { sql: entry } : entry));
-
-// remember puts sql first in History, in place of any entry with the same
-// fingerprint, so a query run with other values or layout keeps one entry.
-function remember(sql, fingerprint) {
-	const same = (entry) => entry.sql === sql || (fingerprint && entry.fingerprint === fingerprint);
-	let history = [{ sql, fingerprint }, ...loadHistory().filter((entry) => !same(entry))].slice(0, MAX_HISTORY);
-	while (history.length > 1 && JSON.stringify(history).length > MAX_HISTORY_CHARS) {
-		history = history.slice(0, Math.ceil(history.length * 0.9));
-	}
-	localStorage.setItem("history", JSON.stringify(history));
-}
+// History moved to the server. What's left from before is just taking up room.
+localStorage.removeItem("history");
 
 // Opens a dialog with nothing focused. Left alone, the browser focuses its first
 // link or button, and draws a focus ring round it that looks like a selection.
@@ -392,51 +379,27 @@ function closeRestore() {
 	document.querySelector("#backups").close();
 }
 
-function forget(sql) {
-	localStorage.setItem("history", JSON.stringify(loadHistory().filter((entry) => entry.sql !== sql)));
-	renderHistory();
-	document.querySelector("#history-search").focus();
+async function showHistory() {
+	const body = document.querySelector("#history-body");
+	body.innerHTML = '<span class="loading loading-spinner loading-sm"></span>';
+	showUnfocused(document.querySelector("#history"));
+	await htmx.ajax("GET", "/history", { target: body });
+	document.querySelector("#history-search")?.focus();
 }
 
-function renderHistory() {
-	const term = document.querySelector("#history-search").value.toLowerCase();
-	const list = document.querySelector("#history-list");
-	const history = loadHistory();
-	const found = history.filter(({ sql }) => sql.toLowerCase().includes(term));
-	if (found.length === 0) {
-		const empty = document.createElement("li");
-		empty.className = "text-base-content/50 text-sm py-1";
-		empty.textContent = history.length === 0 ? "No history yet." : "No matches.";
-		list.replaceChildren(empty);
-		return;
-	}
-	list.replaceChildren(...found.map(({ sql }) => {
-		const item = document.createElement("li");
-		item.className = "flex items-center gap-2";
-		const button = document.createElement("button");
-		button.type = "button";
-		button.className = "font-mono text-xs text-left truncate flex-1 min-w-0 py-1 cursor-pointer hover:underline";
-		button.textContent = button.title = sql;
-		button.onclick = () => {
-			document.querySelector("#history").close();
-			openSQL(sql);
-		};
-		const remove = document.createElement("button");
-		remove.type = "button";
-		remove.className = "btn btn-ghost btn-xs shrink-0";
-		remove.textContent = "✕";
-		remove.title = "Remove from history";
-		remove.setAttribute("aria-label", "Remove from history");
-		remove.onclick = () => forget(sql);
-		item.append(button, remove);
-		return item;
-	}));
+// chooseHistory marks the History entry whose detail is showing. The form
+// keeps its id, so the list still marks it after reloading.
+function chooseHistory(button) {
+	button.form.selected.value = button.dataset.id;
+	for (const row of button.closest("tbody").querySelectorAll("tr[aria-current]")) row.removeAttribute("aria-current");
+	button.closest("tr").setAttribute("aria-current", "true");
 }
 
-function showHistory() {
-	document.querySelector("#history-search").value = "";
-	renderHistory();
-	document.querySelector("#history").showModal();
+// sortHistory sorts the History list by a column's key, "" being last run.
+function sortHistory(button, by) {
+	const form = button.closest("form");
+	form.sort.value = by;
+	htmx.trigger(form, "input");
 }
 
 let openCell;
@@ -556,7 +519,7 @@ document.addEventListener("keydown", (event) => {
 	resize(bar, sizeOf(bar) + step);
 });
 
-Object.assign(window, { fromMenu, newTab, closeActiveTab, selectTab, closeTab, closeAllTabs, useSQL, useDefinition, resetTree, formatSQL, showHistory, showQueries, useQuery, openQueryFile, saveQuery, showActivity, showHealth, activityLive, showBackups, showRestore, closeRestore, showReplace, checkReplace, closeReplace, renderHistory, copyCell, copyPlan, copyFrom });
+Object.assign(window, { fromMenu, newTab, closeActiveTab, selectTab, closeTab, closeAllTabs, useSQL, useDefinition, resetTree, formatSQL, showHistory, chooseHistory, sortHistory, showQueries, useQuery, openQueryFile, saveQuery, showActivity, showHealth, activityLive, showBackups, showRestore, closeRestore, showReplace, checkReplace, closeReplace, copyCell, copyPlan, copyFrom });
 
 // Wails holds back the menu's commands until its runtime says the page is ready.
 // This page doesn't load that runtime, so it says so itself.
@@ -570,8 +533,6 @@ document.addEventListener("click", (event) => {
 // The values given for each tab's :names, for htmx:configRequest to use. Export
 // asks before its Save dialog, so they have to wait for its second request.
 const paramValues = new Map();
-// The fingerprint of each tab's query as it last ran, for History.
-const fingerprints = new Map();
 
 // check asks the server about sql before it runs. If it can't, the query
 // itself fails too, so there's nothing to warn about.
@@ -593,14 +554,13 @@ const closeMenus = (except) => {
 document.addEventListener("click", (event) => closeMenus(event.target));
 document.addEventListener("keydown", (event) => event.key === "Escape" && closeMenus());
 
-// Sends the selection rather than the whole editor, and remembers what ran.
+// Sends the selection rather than the whole editor, and what was typed for History.
 document.addEventListener("htmx:configRequest", (event) => {
 	const { elt, formData, path } = event.detail;
 	if (!formData.has("sql")) return;
 	const sql = sqlToRun(elt);
 	formData.set("sql", fillParams(sql, paramValues.get(elt.closest("[data-tab]").dataset.tab) ?? {}));
-	// As typed, so running it again from History asks again.
-	if (path === "/query" && sql.trim()) remember(sql.trim(), fingerprints.get(elt.closest("[data-tab]").dataset.tab));
+	if (path === "/query" && sql.trim()) formData.set("typed", sql.trim());
 });
 
 // Counts up beside Running…, to tell a slow query from a stuck one.
@@ -619,6 +579,17 @@ document.addEventListener("htmx:beforeSend", (event) => {
 document.addEventListener("htmx:afterRequest", (event) => {
 	const timer = event.detail.elt.closest?.("[data-tab]")?.querySelector(".timer");
 	if (timer && event.detail.requestConfig?.formData?.has("sql")) clearInterval(timer.interval);
+});
+
+// A History note saves as its box loses focus, so the box shows that it did,
+// briefly, or that it didn't, until it does.
+document.addEventListener("htmx:afterRequest", (event) => {
+	const box = event.detail.elt;
+	if (!box.matches?.("#history-detail textarea[name=note]")) return;
+	const saved = event.detail.successful;
+	box.classList.toggle("textarea-error", !saved);
+	box.classList.toggle("textarea-success", saved);
+	if (saved) setTimeout(() => box.classList.remove("textarea-success"), 1500);
 });
 
 // Runs before htmx sends a query, for the ones worth a second thought.
@@ -641,10 +612,9 @@ document.addEventListener("htmx:confirm", (event) => {
 		if (!values) return;
 		if (isQuery) {
 			// Filled in, as :names aren't SQL the server can parse.
-			const { everyRow, fingerprint } = await check(fillParams(sql, values));
+			const { everyRow } = await check(fillParams(sql, values));
 			const warning = warningFor(triggeringEvent?.submitter?.value, everyRow);
 			if (warning && !(await ask(warning))) return;
-			fingerprints.set(tab, fingerprint);
 		}
 		paramValues.set(tab, values);
 		event.detail.issueRequest(true);
