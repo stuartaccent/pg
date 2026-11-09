@@ -29,7 +29,11 @@ const icons = {
 	FilePen, Folder, FolderOpen, Gauge, Hash, HeartPulse, History, KeyRound, Languages, Layers, ListTree, Play, Plus, RefreshCw, Save,
 	Search, Server, Settings, Shapes, ShieldCheck, Square, SquareFunction, Star, SunMoon, Table2, Trash2, User, Users, X, Zap,
 };
-const drawIcons = () => createIcons({ icons, attrs: { "aria-hidden": "true" } });
+// Only within root: the SVGs keep data-lucide, so drawing the whole page
+// again redraws every icon there, which made each tree expand slower.
+// An icon loaded on its own is drawn from its parent, as root's own match isn't searched.
+const drawIcons = (root) =>
+	createIcons({ icons, root: root.matches?.("[data-lucide]") ? root.parentElement : root, attrs: { "aria-hidden": "true" } });
 
 const sqlLanguage = () => sql({ dialect: PostgreSQL, schema: completions.schemas ?? {}, defaultSchema: completions.defaultSchema || undefined });
 
@@ -698,9 +702,9 @@ document.addEventListener("htmx:confirm", (event) => {
 	})();
 });
 
-htmx.onLoad(() => {
+htmx.onLoad((elt) => {
 	mountNewPanels();
-	drawIcons();
+	drawIcons(elt);
 });
 document.addEventListener("DOMContentLoaded", () => {
 	if (localStorage.getItem("sidebar") === "queries") showSidebar("queries");
