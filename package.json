@@ -12,6 +12,7 @@
     "@lezer/highlight": "1.2.5",
     "codemirror": "6.0.2",
     "esbuild": "0.28.2",
+    "lucide": "1.70.0",
     "sql-formatter": "15.9.0"
   }
 }

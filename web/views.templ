@@ -28,54 +28,93 @@ templ Index(services []string, current string, readOnly bool, j jobView, err err
 			<link rel="icon" href="/static/favicon.svg" type="image/svg+xml"/>
 			<link rel="stylesheet" href="/static/app.css"/>
 		</head>
-		<body class="h-screen flex flex-col gap-2 bg-base-300 text-sm">
-			<header class="navbar bg-base-100 border-b border-base-300 min-h-12 shrink-0 gap-2 px-2" data-theme="dark">
-				<form hx-post="/connect" hx-trigger="change" hx-target="#status">
+		<!-- A desktop window rather than a page: panes meet edge to edge with hairlines,
+		     chrome (toolbar, rail, sidebar, tab strip, status bar) sits on base-200 and
+		     content (editor, results) on base-100. Only the editor, results and status
+		     text can be selected, as in a native app. -->
+		<body class="h-screen flex flex-col overflow-hidden bg-base-100 text-[13px] select-none">
+			<!-- A read-only service draws a warning line along the top of this: see app.css. -->
+			<header id="toolbar" class="flex h-11 shrink-0 items-center gap-1 border-b border-base-content/10 bg-base-200 px-2">
+				<form hx-post="/connect" hx-trigger="change" hx-target="#status" class="flex items-center gap-1.5">
+					<i data-lucide="server" class="size-4 text-base-content/50" aria-hidden="true"></i>
 					<span id="service-picker">
 						@serviceSelect(services, current)
 					</span>
 				</form>
-				<button type="button" class="btn btn-ghost btn-sm ml-auto" onclick="showActivity()">Activity</button>
-				<button type="button" class="btn btn-ghost btn-sm" onclick="showHealth()">Health</button>
-				<button type="button" class="btn btn-ghost btn-sm" onclick="showBackups()">Backups</button>
-				<details class="dropdown dropdown-end">
-					<summary class="btn btn-ghost btn-sm">Config</summary>
-					<ul class="menu dropdown-content z-10 w-48 rounded-box bg-base-200 shadow-md">
-						<li><button type="button" hx-post="/config/services" hx-target="#status" onclick="this.closest('details').open = false">Edit services</button></li>
-						<li><button type="button" hx-post="/config/passwords" hx-target="#status" onclick="this.closest('details').open = false">Edit passwords</button></li>
-					</ul>
-				</details>
-				<button type="button" class="btn btn-square btn-ghost btn-sm" aria-label="Toggle light or dark theme" onclick="toggleTheme()">◐</button>
-			</header>
-			<div class="flex flex-1 min-h-0 gap-2 px-2">
-				<aside class="flex flex-col w-(--sidebar-width) shrink-0 overflow-hidden rounded-box bg-base-100 shadow-md">
-					<div class="flex items-center gap-1 px-2 pt-2">
-						<input
-							id="tree-search"
-							type="search"
-							name="id"
-							class="input input-xs flex-1"
-							placeholder="Search objects…"
-							aria-label="Search objects"
-							hx-get={ "/tree?kind=" + catalog.SearchKind }
-							hx-trigger="input changed delay:200ms, search"
-							hx-target="#tree"
-							hx-sync="this:replace"
-						/>
-						<button type="button" class="btn btn-square btn-ghost btn-xs" aria-label="Refresh tree" hx-get={ treeURL(catalog.RootKind, "") } hx-target="#tree" onclick="resetTree()">↻</button>
+				<nav class="ml-auto flex items-center gap-0.5" aria-label="Server tools">
+					<div class="tooltip tooltip-bottom" data-tip="Activity">
+						<button type="button" class="btn btn-ghost btn-sm btn-square" aria-label="Activity" onclick="showActivity()"><i data-lucide="activity" class="size-4"></i></button>
 					</div>
-					<ul id="tree" class="menu menu-xs w-full flex-1 min-h-0 overflow-auto flex-nowrap" hx-get={ treeURL(catalog.RootKind, "") } hx-trigger="load, connected from:body">
-						<li class="text-base-content/60 px-2">Choose a service to browse it.</li>
-					</ul>
+					<div class="tooltip tooltip-bottom" data-tip="Health">
+						<button type="button" class="btn btn-ghost btn-sm btn-square" aria-label="Health" onclick="showHealth()"><i data-lucide="heart-pulse" class="size-4"></i></button>
+					</div>
+					<div class="tooltip tooltip-bottom" data-tip="Backups">
+						<button type="button" class="btn btn-ghost btn-sm btn-square" aria-label="Backups" onclick="showBackups()"><i data-lucide="archive" class="size-4"></i></button>
+					</div>
+					<details class="dropdown dropdown-end">
+						<summary class="btn btn-ghost btn-sm btn-square" aria-label="Config" title="Config"><i data-lucide="settings" class="size-4"></i></summary>
+						<ul class="menu menu-sm dropdown-content z-10 mt-1 w-48 rounded-box border border-base-content/10 bg-base-200 p-1 shadow-xl">
+							<li><button type="button" hx-post="/config/services" hx-target="#status" onclick="this.closest('details').open = false"><i data-lucide="file-pen" class="size-4"></i>Edit services</button></li>
+							<li><button type="button" hx-post="/config/passwords" hx-target="#status" onclick="this.closest('details').open = false"><i data-lucide="key-round" class="size-4"></i>Edit passwords</button></li>
+						</ul>
+					</details>
+					<div class="tooltip tooltip-bottom tooltip-left" data-tip="Light or dark">
+						<button type="button" class="btn btn-ghost btn-sm btn-square" aria-label="Toggle light or dark theme" onclick="toggleTheme()"><i data-lucide="sun-moon" class="size-4"></i></button>
+					</div>
+				</nav>
+			</header>
+			<div class="flex flex-1 min-h-0">
+				<!-- The rail picks what the sidebar shows. History has more to show than
+				     fits beside the editor, so it keeps its dialog. -->
+				<nav class="flex w-11 shrink-0 flex-col items-center gap-1 border-r border-base-content/10 bg-base-200 py-2" aria-label="Sidebar">
+					@railButton("Explorer", "database", "tree", `showSidebar("tree")`)
+					@railButton("Saved queries", "bookmark", "queries", `showSidebar("queries")`)
+					@railButton("History", "history", "", "showHistory()")
+				</nav>
+				<aside class="flex w-(--sidebar-width) shrink-0 flex-col overflow-hidden bg-base-200" aria-label="Sidebar">
+					<section data-sidebar="tree" class="flex min-h-0 flex-1 flex-col">
+						<div class="flex h-9 shrink-0 items-center gap-1 pl-3 pr-1">
+							<h2 class="flex-1 text-[11px] font-semibold uppercase tracking-wider text-base-content/50">Explorer</h2>
+							<button type="button" class="btn btn-square btn-ghost btn-xs" aria-label="Refresh tree" title="Refresh" hx-get={ treeURL(catalog.RootKind, "") } hx-target="#tree" onclick="resetTree()"><i data-lucide="refresh-cw" class="size-3.5"></i></button>
+						</div>
+						<div class="shrink-0 px-2 pb-2">
+							<label class="input input-xs w-full bg-base-100/60">
+								<i data-lucide="search" class="size-3 opacity-50" aria-hidden="true"></i>
+								<input
+									id="tree-search"
+									type="search"
+									name="id"
+									placeholder="Search objects…"
+									aria-label="Search objects"
+									hx-get={ "/tree?kind=" + catalog.SearchKind }
+									hx-trigger="input changed delay:200ms, search"
+									hx-target="#tree"
+									hx-sync="this:replace"
+								/>
+							</label>
+						</div>
+						<ul id="tree" class="menu menu-xs w-full flex-1 min-h-0 overflow-auto flex-nowrap pt-0" hx-get={ treeURL(catalog.RootKind, "") } hx-trigger="load, connected from:body">
+							<li class="text-base-content/60 px-2">Choose a service to browse it.</li>
+						</ul>
+					</section>
+					<section data-sidebar="queries" class="flex min-h-0 flex-1 flex-col" hidden>
+						<div class="flex h-9 shrink-0 items-center gap-1 pl-3 pr-1">
+							<h2 class="flex-1 text-[11px] font-semibold uppercase tracking-wider text-base-content/50">Saved queries</h2>
+							<button type="button" class="btn btn-square btn-ghost btn-xs" aria-label="Open a query file" title="Open file… (⌘O)" onclick="openQueryFile()"><i data-lucide="folder-open" class="size-3.5"></i></button>
+						</div>
+						<div id="queries-body" class="flex-1 min-h-0 overflow-auto"></div>
+					</section>
 				</aside>
-				<div role="separator" aria-orientation="vertical" aria-label="Resize the sidebar" tabindex="0" data-resize="width" class="w-2 -mx-2 shrink-0 cursor-col-resize touch-none rounded hover:bg-primary/30 focus:bg-primary/30 focus:outline-none"></div>
-				<div class="flex flex-col flex-1 min-w-0 gap-2">
-					<div class="flex items-center gap-1 shrink-0">
-						<div id="tabs" role="tablist" class="tabs tabs-border tabs-xs">
+				<!-- 1px line with a 7px grip. -->
+				<div role="separator" aria-orientation="vertical" aria-label="Resize the sidebar" tabindex="0" data-resize="width" class="relative z-1 -mx-0.75 w-1.75 shrink-0 cursor-col-resize touch-none before:absolute before:inset-y-0 before:left-0.75 before:w-px before:bg-base-content/10 hover:before:bg-primary focus-visible:outline-none focus-visible:before:bg-primary"></div>
+				<div class="flex flex-col flex-1 min-w-0">
+					<div class="flex h-9 shrink-0 border-b border-base-content/10 bg-base-200">
+						<!-- Never scrolls up and down: tabs are exactly its height. -->
+						<div id="tabs" role="tablist" aria-label="Query tabs" class="flex min-w-0 overflow-x-auto overflow-y-hidden [scrollbar-width:none]">
 							@tabButton("1")
 						</div>
-						<button type="button" class="btn btn-square btn-ghost btn-xs" aria-label="New query tab" hx-post="/tabs" hx-target="#panels" hx-swap="beforeend">+</button>
-						<button type="button" class="btn btn-ghost btn-xs ml-auto" onclick="closeAllTabs()">Close all</button>
+						<button type="button" class="btn btn-square btn-ghost btn-xs mx-1 self-center" aria-label="New query tab" title="New tab (⌘T)" hx-post="/tabs" hx-target="#panels" hx-swap="beforeend"><i data-lucide="plus" class="size-3.5"></i></button>
+						<button type="button" class="btn btn-square btn-ghost btn-xs ml-auto mr-1 self-center" aria-label="Close all tabs" title="Close all tabs" onclick="closeAllTabs()"><i data-lucide="copy-x" class="size-3.5"></i></button>
 					</div>
 					<div id="panels" class="flex flex-1 min-h-0">
 						@tabPanel("1")
@@ -83,7 +122,7 @@ templ Index(services []string, current string, readOnly bool, j jobView, err err
 				</div>
 			</div>
 			<!-- Grows for an error, rather than cutting it off. -->
-			<footer class="flex items-center gap-4 min-h-9 shrink-0 px-4 py-1 bg-base-100 border-t border-base-300 text-xs">
+			<footer class="flex items-center gap-4 min-h-6 shrink-0 px-3 py-0.5 bg-base-200 border-t border-base-content/10 text-[11px] text-base-content/80 select-text">
 				<span id="status" class="flex-1 min-w-0">
 					if err != nil {
 						<span class="text-error whitespace-pre-wrap">{ err.Error() }</span>
@@ -120,10 +159,6 @@ templ Index(services []string, current string, readOnly bool, j jobView, err err
 			</dialog>
 			<dialog id="backups" class="modal">
 				<div id="backups-body" class="modal-box max-w-4xl"></div>
-				<form method="dialog" class="modal-backdrop"><button aria-label="Close">close</button></form>
-			</dialog>
-			<dialog id="queries" class="modal">
-				<div id="queries-body" class="modal-box max-w-4xl"></div>
 				<form method="dialog" class="modal-backdrop"><button aria-label="Close">close</button></form>
 			</dialog>
 			<dialog id="save-query" class="modal">
@@ -217,18 +252,76 @@ templ Index(services []string, current string, readOnly bool, j jobView, err err
 	</html>
 }
 
+// railButton is one of the icons down the left. With a view, it switches the
+// sidebar to it, and shows whether that's the one showing.
+templ railButton(label, icon, view, action string) {
+	<div class="tooltip tooltip-right" data-tip={ label }>
+		<button
+			type="button"
+			class="btn btn-ghost btn-sm btn-square relative text-base-content/50 hover:text-base-content aria-pressed:bg-base-300 aria-pressed:text-base-content aria-pressed:before:absolute aria-pressed:before:-left-1.5 aria-pressed:before:inset-y-1.5 aria-pressed:before:w-0.5 aria-pressed:before:rounded-full aria-pressed:before:bg-primary"
+			aria-label={ label }
+			if view != "" {
+				data-sidebar-button={ view }
+				aria-pressed={ fmt.Sprint(view == "tree") }
+			}
+			onclick={ templ.JSUnsafeFuncCall(action) }
+		>
+			<i data-lucide={ icon } class="size-4.5"></i>
+		</button>
+	</div>
+}
+
+// tabButton is a tab in the strip. app.js marks the open one with tab-active.
+// The close button keeps its place and only fades in, so hovering never
+// changes a tab's width and moves the ones after it.
 templ tabButton(id string) {
-	<span class="tab gap-2" data-tab-button={ id }>
-		<button type="button" class="cursor-pointer" onclick="selectTab(this.parentElement.dataset.tabButton)">Query { id }</button>
-		<button type="button" class="tab-close cursor-pointer opacity-50 hover:opacity-100" aria-label={ "Close Query " + id } onclick="closeTab(this.parentElement.dataset.tabButton)">✕</button>
+	<span class="group relative flex h-full shrink-0 items-center gap-1.5 border-r border-base-content/10 pl-3 pr-1 text-base-content/60 [&.tab-active]:bg-base-100 [&.tab-active]:text-base-content [&:not(.tab-active)]:hover:bg-base-300/50" data-tab-button={ id }>
+		<span aria-hidden="true" class="invisible absolute inset-x-0 top-0 h-0.5 bg-primary group-[.tab-active]:visible"></span>
+		<button type="button" role="tab" aria-selected={ fmt.Sprint(id == "1") } class="flex cursor-pointer items-center gap-1.5 whitespace-nowrap focus-visible:underline focus-visible:outline-none" onclick="selectTab(this.parentElement.dataset.tabButton)">
+			<i data-lucide="file-code" class="size-3.5 opacity-60"></i>
+			Query { id }
+		</button>
+		<button type="button" class="tab-close btn btn-ghost btn-xs btn-square size-5 min-h-0 p-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100" aria-label={ "Close Query " + id } onclick="closeTab(this.parentElement.dataset.tabButton)"><i data-lucide="x" class="size-3"></i></button>
 	</span>
 }
 
+// tabPanel is a tab's toolbar, editor and results. group/tab lets the toolbar
+// react while a query runs: htmx marks the Running… indicator htmx-request.
 templ tabPanel(id string) {
-	<section data-tab={ id } class="flex flex-col flex-1 min-w-0 min-h-0 gap-2">
+	<section data-tab={ id } class="group/tab flex flex-col flex-1 min-w-0 min-h-0">
+		<!-- Outside the form on purpose: inside it, Stop would inherit
+		     hx-sync="this:replace" and abort the very request it is cancelling. -->
+		<div class="flex h-10 shrink-0 items-center gap-1 border-b border-base-content/10 px-2">
+			<div class="join mr-1">
+				<button type="submit" form={ "editor-" + id } class="btn btn-primary btn-sm join-item gap-1.5" title="Run (⌘↵), or just the selection">
+					<i data-lucide="play" class="size-3.5 fill-current"></i>
+					Run
+				</button>
+				<button type="button" class="btn btn-primary btn-sm join-item px-1.5" popovertarget={ "run-menu-" + id } style={ templ.SafeCSS("anchor-name:--run-menu-" + id) } aria-label="More ways to run"><i data-lucide="chevron-down" class="size-3.5"></i></button>
+			</div>
+			<ul popover id={ "run-menu-" + id } style={ templ.SafeCSS("position-anchor:--run-menu-" + id) } class="dropdown menu menu-sm z-10 mt-1 w-48 rounded-box border border-base-content/10 bg-base-200 p-1 shadow-xl">
+				<li><button type="submit" form={ "editor-" + id } name="explain" value="1" onclick="this.closest('[popover]').hidePopover()"><i data-lucide="list-tree" class="size-4"></i>Explain</button></li>
+				<li><button type="submit" form={ "editor-" + id } name="explain" value="analyze" onclick="this.closest('[popover]').hidePopover()"><i data-lucide="gauge" class="size-4"></i>Explain analyze</button></li>
+			</ul>
+			<!-- Dim until something runs, then red. -->
+			<button type="button" class="btn btn-ghost btn-sm gap-1.5 text-base-content/40 group-has-[.htmx-indicator.htmx-request]/tab:text-error" hx-post="/cancel" hx-vals={ fmt.Sprintf(`{"tab":%q}`, id) } hx-swap="none" title="Stop the running query">
+				<i data-lucide="square" class="size-3.5"></i>
+				Stop
+			</button>
+			<div class="mx-1 h-5 w-px bg-base-content/10" aria-hidden="true"></div>
+			<div class="tooltip tooltip-bottom" data-tip="Format (⇧⌘F)">
+				<button type="button" class="btn btn-ghost btn-sm btn-square" aria-label="Format SQL" onclick="formatSQL()"><i data-lucide="align-left" class="size-4"></i></button>
+			</div>
+			<div class="tooltip tooltip-bottom" data-tip="Save query (⌘S)">
+				<button type="button" class="btn btn-ghost btn-sm btn-square" aria-label="Save query" onclick="saveQuery()"><i data-lucide="save" class="size-4"></i></button>
+			</div>
+			<div class="tooltip tooltip-bottom" data-tip="Open file (⌘O)">
+				<button type="button" class="btn btn-ghost btn-sm btn-square" aria-label="Open a query file" onclick="openQueryFile()"><i data-lucide="folder-open" class="size-4"></i></button>
+			</div>
+		</div>
 		<form
 			id={ "editor-" + id }
-			class="h-(--editor-height) overflow-hidden rounded-box bg-base-100 shadow-md shrink-0"
+			class="h-(--editor-height) shrink-0 overflow-hidden bg-base-100 select-text"
 			hx-post="/query"
 			hx-target={ "#results-" + id }
 			hx-sync="this:replace"
@@ -237,34 +330,19 @@ templ tabPanel(id string) {
 			<input type="hidden" name="tab" value={ id }/>
 			<textarea name="sql" class="hidden" aria-hidden="true"></textarea>
 		</form>
-		<div role="separator" aria-orientation="horizontal" aria-label="Resize the editor" tabindex="0" data-resize="height" class="h-2 -my-2 shrink-0 cursor-row-resize touch-none rounded hover:bg-primary/30 focus:bg-primary/30 focus:outline-none"></div>
-		<!-- Outside the form on purpose: inside it, Cancel would inherit
-		     hx-sync="this:replace" and abort the very request it is cancelling. -->
-		<div class="flex flex-wrap items-center gap-2 shrink-0">
-			<button type="submit" form={ "editor-" + id } class="btn btn-primary btn-sm">Run</button>
-			<button type="submit" form={ "editor-" + id } name="explain" value="1" class="btn btn-soft btn-sm">Explain</button>
-			<button type="submit" form={ "editor-" + id } name="explain" value="analyze" class="btn btn-soft btn-sm">Analyze</button>
-			<button type="button" class="btn btn-soft btn-sm" hx-post="/cancel" hx-vals={ fmt.Sprintf(`{"tab":%q}`, id) } hx-swap="none">Cancel</button>
-			<button type="button" class="btn btn-ghost btn-sm" onclick="formatSQL()">Format</button>
+		<div role="separator" aria-orientation="horizontal" aria-label="Resize the editor" tabindex="0" data-resize="height" class="relative z-1 -my-0.75 h-1.75 shrink-0 cursor-row-resize touch-none before:absolute before:inset-x-0 before:top-0.75 before:h-px before:bg-base-content/10 hover:before:bg-primary focus-visible:outline-none focus-visible:before:bg-primary"></div>
+		<div class="flex h-8 shrink-0 items-center gap-3 border-b border-base-content/10 bg-base-200 px-3 text-xs">
+			<span class="font-medium text-base-content/70">Results</span>
+			<span id={ "running-" + id } class="htmx-indicator flex items-center gap-1.5 text-base-content/60">
+				<span class="loading loading-spinner loading-xs text-primary"></span>
+				Running… <span class="timer font-mono tabular-nums"></span>
+			</span>
 			<!-- Two steps, as the Save dialog can stay open a while and that isn't
 			     running anything: Running… only belongs to the second. -->
-			<button id={ "export-" + id } type="button" class="btn btn-ghost btn-sm" hx-post="/export/choose" hx-vals={ fmt.Sprintf(`{"tab":%q}`, id) } hx-target="#notice">Export CSV</button>
+			<button id={ "export-" + id } type="button" class="btn btn-ghost btn-xs ml-auto gap-1.5" hx-post="/export/choose" hx-vals={ fmt.Sprintf(`{"tab":%q}`, id) } hx-target="#notice"><i data-lucide="download" class="size-3.5"></i>Export CSV</button>
 			<span class="hidden" hx-post="/export" hx-trigger={ "export-ready from:#export-" + id } hx-include={ "#editor-" + id } hx-target="#notice" hx-indicator={ "#running-" + id }></span>
-			<button type="button" class="btn btn-ghost btn-sm" onclick="showHistory()">History</button>
-			<details class="dropdown">
-				<summary class="btn btn-ghost btn-sm">Queries</summary>
-				<ul class="menu dropdown-content z-10 w-44 rounded-box bg-base-200 shadow-md">
-					<li><button type="button" onclick="this.closest('details').open = false; showQueries()">Saved queries…</button></li>
-					<li><button type="button" onclick="this.closest('details').open = false; openQueryFile()">Open file…</button></li>
-				</ul>
-			</details>
-			<button type="button" class="btn btn-ghost btn-sm" onclick="saveQuery()">Save</button>
-			<span id={ "running-" + id } class="htmx-indicator flex items-center gap-1 text-base-content/60">
-				<span class="loading loading-spinner loading-xs"></span>
-				Running… <span class="timer tabular-nums"></span>
-			</span>
 		</div>
-		<main id={ "results-" + id } class="results flex-1 min-h-0 overflow-auto rounded-box bg-base-100 shadow-md"></main>
+		<main id={ "results-" + id } class="results flex-1 min-h-0 overflow-auto bg-base-100 select-text"></main>
 	</section>
 }
 
@@ -471,23 +549,25 @@ templ backupMenu(id string, f backupFile, service, database string, canRestore b
 	</ul>
 }
 
-// QueriesBody is the Queries dialog's content.
+// QueriesBody is the Saved queries list in the sidebar.
 templ QueriesBody(dir string, names []string, err error) {
-	<h3 class="font-medium">Saved queries</h3>
 	if err != nil {
-		<p class="text-error whitespace-pre-wrap mt-2">{ err.Error() }</p>
+		<p class="text-error text-xs whitespace-pre-wrap px-3 pb-2">{ err.Error() }</p>
 	}
-	<button type="button" class="link link-hover text-base-content/60 text-xs mt-1 cursor-pointer" title="Open in Finder. Anything ending .sql here is listed." hx-post="/queries/open" hx-target="#queries-body">{ dir }</button>
-	<ul class="mt-2 max-h-[60vh] overflow-auto">
+	<ul class="menu menu-xs w-full flex-nowrap pt-0">
 		if len(names) == 0 {
-			<li class="text-base-content/50 text-sm py-1">No saved queries yet.</li>
+			<li class="menu-disabled"><span>No saved queries yet.</span></li>
 		}
 		for _, name := range names {
 			<li>
-				<button type="button" class="text-left truncate w-full py-1 cursor-pointer hover:underline" title={ name } data-name={ name } data-url={ "/queries/" + url.PathEscape(name) } onclick="useQuery(event, this)">{ name }</button>
+				<button type="button" title={ name } data-name={ name } data-url={ "/queries/" + url.PathEscape(name) } onclick="useQuery(event, this)">
+					<i data-lucide="file-code" class="size-3.5 shrink-0 text-primary"></i>
+					<span class="truncate">{ name }</span>
+				</button>
 			</li>
 		}
 	</ul>
+	<button type="button" class="link link-hover block w-full truncate px-3 py-2 text-left text-[11px] text-base-content/50 cursor-pointer" title="Open in Finder. Anything ending .sql here is listed." hx-post="/queries/open" hx-target="#queries-body">{ dir }</button>
 }
 
 // SaveStatus says why a query wasn't saved, offering to replace one of the
@@ -641,15 +721,15 @@ templ ConnectStatus(service string, readOnly bool, err error) {
 			<span class="text-base-content/60 ml-1">Passwords go in ~/.pgpass, as host:port:database:user:password. Use Config to edit it.</span>
 		}
 	} else {
-		<span class="text-success">Connected to { service }</span>
+		<span class="inline-flex items-center gap-1.5"><span class="status status-success" aria-hidden="true"></span>Connected to { service }</span>
 		if readOnly {
-			<span class="badge badge-warning badge-sm ml-1">read-only</span>
+			<span class="badge badge-warning badge-xs ml-1" data-read-only>read-only</span>
 		}
 		if dockerpg.IsSandbox(service) {
-			<span class="badge badge-info badge-sm ml-1">sandbox</span>
+			<span class="badge badge-info badge-xs ml-1">sandbox</span>
 		}
 		if path := conn.ExposedPassFile(); path != "" {
-			<span class="badge badge-error badge-sm ml-1" title="Anyone with access to this computer can read your passwords">Password file is readable by others: chmod 600 { path }</span>
+			<span class="badge badge-error badge-xs ml-1" title="Anyone with access to this computer can read your passwords">Password file is readable by others: chmod 600 { path }</span>
 		}
 	}
 }
@@ -684,6 +764,9 @@ templ TreeNodes(nodes []catalog.Node, err error) {
 
 templ treeLabel(n catalog.Node) {
 	<span class="group flex items-baseline gap-2 min-w-0 w-full">
+		if icon := nodeIcon(n); icon != "" {
+			<i data-lucide={ icon } class={ "size-3.5 shrink-0 self-center", nodeIconColour(icon) } aria-hidden="true"></i>
+		}
 		if n.SQL != "" {
 			<button type="button" class="cursor-pointer min-w-0 truncate hover:underline" title={ n.Label } data-sql={ n.SQL } onclick="useSQL(event, this)">{ n.Label }</button>
 		} else if n.Def != "" {
@@ -703,6 +786,63 @@ templ treeLabel(n catalog.Node) {
 // fileValues is the hx-vals naming a backup.
 func fileValues(name string) string {
 	return fmt.Sprintf(`{"file":%q}`, name)
+}
+
+// nodeIcon is the Lucide icon for a tree node: by what it opens to, or for a
+// leaf, by what its definition is. Columns and the like have none.
+func nodeIcon(n catalog.Node) string {
+	switch n.Kind {
+	case "schema":
+		return "layers"
+	case "roles", "memberof", "members":
+		return "users"
+	case "role":
+		return "user"
+	case "table", "partitioned":
+		return "table-2"
+	case "view":
+		return "eye"
+	case "matview":
+		return "box"
+	case "columns":
+		return "columns-3"
+	case "indexes":
+		return "list-tree"
+	case "constraints":
+		return "shield-check"
+	case "triggers":
+		return "zap"
+	case "grants":
+		return "key-round"
+	case "":
+		switch n.Def {
+		case "function":
+			return "square-function"
+		case "sequence":
+			return "hash"
+		case "type", "domain":
+			return "shapes"
+		case "collation":
+			return "languages"
+		case "role":
+			return "user"
+		}
+		return ""
+	}
+	return "folder"
+}
+
+// nodeIconColour picks out the objects you query, over the folders around them.
+func nodeIconColour(icon string) string {
+	switch icon {
+	case "table-2":
+		return "text-info"
+	case "eye", "box":
+		return "text-secondary"
+	case "square-function":
+		return "text-accent"
+	}
+	return "text-base-content/50"
 }
 
 func treeURL(kind, id string) string {
@@ -726,7 +866,7 @@ templ Results(p session.Page, tab string) {
 		</pre>
 		@summary(p)
 	} else {
-		<table class="table table-sm table-pin-rows font-mono">
+		<table class="table table-xs table-pin-rows font-mono text-[12px] [&_th]:bg-base-200 [&_th]:font-sans [&_th]:text-[11px] [&_th]:font-semibold [&_th]:text-base-content [&_:is(th,td)]:border-r [&_:is(th,td)]:border-base-content/5">
 			<thead>
 				<tr>
 					for _, c := range p.Columns {

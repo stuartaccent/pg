@@ -7,6 +7,11 @@ import { Compartment, Prec } from "@codemirror/state";
 import { keymap, placeholder } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import { formatDialect, postgresql } from "sql-formatter";
+import {
+	Activity, AlignLeft, Archive, Bookmark, Box, ChevronDown, Columns3, CopyX, Database, Download, Eye, FileCode, FilePen, Folder,
+	FolderOpen, Gauge, Hash, HeartPulse, History, KeyRound, Languages, Layers, ListTree, Play, Plus, RefreshCw, Save, Search, Server,
+	Settings, Shapes, ShieldCheck, Square, SquareFunction, SunMoon, Table2, User, Users, X, Zap, createIcons,
+} from "lucide";
 import { fillParams, paramNames } from "./params.mjs";
 import { warningFor } from "./risky.mjs";
 import { tablesAt } from "./tables.mjs";
@@ -16,6 +21,15 @@ const language = new Compartment();
 let completions = {};
 let activeTab;
 const MIN_PANE = 80; // the smallest a dragged pane gets; what's beside it keeps twice this, as it holds the buttons too
+
+// The icons the page uses, bundled so they work offline. The markup asks for
+// one with <i data-lucide="name">; createIcons swaps it for the SVG.
+const icons = {
+	Activity, AlignLeft, Archive, Bookmark, Box, ChevronDown, Columns3, CopyX, Database, Download, Eye, FileCode, FilePen, Folder,
+	FolderOpen, Gauge, Hash, HeartPulse, History, KeyRound, Languages, Layers, ListTree, Play, Plus, RefreshCw, Save, Search, Server,
+	Settings, Shapes, ShieldCheck, Square, SquareFunction, SunMoon, Table2, User, Users, X, Zap,
+};
+const drawIcons = () => createIcons({ icons, attrs: { "aria-hidden": "true" } });
 
 const sqlLanguage = () => sql({ dialect: PostgreSQL, schema: completions.schemas ?? {}, defaultSchema: completions.defaultSchema || undefined });
 
@@ -95,7 +109,11 @@ function mount(panel) {
 function selectTab(id) {
 	activeTab = id;
 	for (const panel of document.querySelectorAll("[data-tab]")) panel.hidden = panel.dataset.tab !== id;
-	for (const tab of document.querySelectorAll("[data-tab-button]")) tab.classList.toggle("tab-active", tab.dataset.tabButton === id);
+	for (const tab of document.querySelectorAll("[data-tab-button]")) {
+		const active = tab.dataset.tabButton === id;
+		tab.classList.toggle("tab-active", active);
+		tab.querySelector("[role=tab]")?.setAttribute("aria-selected", active);
+	}
 	views.get(id).focus();
 }
 
@@ -264,16 +282,21 @@ async function showBackups() {
 	showUnfocused(document.querySelector("#backups"));
 }
 
-async function showQueries() {
-	await htmx.ajax("GET", "/queries", { target: "#queries-body" });
-	showUnfocused(document.querySelector("#queries"));
+// Shows a view in the sidebar: "tree", or "queries", which reloads its list
+// each time, as files can change in Finder meanwhile.
+function showSidebar(name) {
+	for (const view of document.querySelectorAll("[data-sidebar]")) view.hidden = view.dataset.sidebar !== name;
+	for (const button of document.querySelectorAll("[data-sidebar-button]")) button.setAttribute("aria-pressed", button.dataset.sidebarButton === name);
+	localStorage.setItem("sidebar", name);
+	if (name === "queries") return htmx.ajax("GET", "/queries", { target: "#queries-body" });
 }
+
+const showQueries = () => showSidebar("queries");
 
 // Which saved query each tab holds, to offer its name when saving again.
 const tabQueries = new Map();
 
 async function useQuery(event, el) {
-	document.querySelector("#queries").close();
 	await useDefinition(event, el);
 	tabQueries.set(activeTab, el.dataset.name);
 }
@@ -295,6 +318,7 @@ async function saveQuery() {
 		// Somewhere outside the folder isn't a name it can be offered under.
 		if (answer.startsWith("/")) tabQueries.delete(tab);
 		else tabQueries.set(tab, answer);
+		if (localStorage.getItem("sidebar") === "queries") showSidebar("queries");
 	}
 }
 
@@ -321,6 +345,7 @@ function showSaveQuery(name, text) {
 
 document.addEventListener("query-saved", () => {
 	document.querySelector("#save-query").close();
+	if (localStorage.getItem("sidebar") === "queries") showSidebar("queries");
 	const name = document.querySelector("#save-name").value.trim().replace(/\.sql$/, "");
 	tabQueries.set(activeTab, name);
 	document.querySelector("#notice").textContent = `Saved ${name}`;
@@ -519,7 +544,7 @@ document.addEventListener("keydown", (event) => {
 	resize(bar, sizeOf(bar) + step);
 });
 
-Object.assign(window, { fromMenu, newTab, closeActiveTab, selectTab, closeTab, closeAllTabs, useSQL, useDefinition, resetTree, formatSQL, showHistory, chooseHistory, sortHistory, showQueries, useQuery, openQueryFile, saveQuery, showActivity, showHealth, activityLive, showBackups, showRestore, closeRestore, showReplace, checkReplace, closeReplace, copyCell, copyPlan, copyFrom });
+Object.assign(window, { showSidebar, fromMenu, newTab, closeActiveTab, selectTab, closeTab, closeAllTabs, useSQL, useDefinition, resetTree, formatSQL, showHistory, chooseHistory, sortHistory, showQueries, useQuery, openQueryFile, saveQuery, showActivity, showHealth, activityLive, showBackups, showRestore, closeRestore, showReplace, checkReplace, closeReplace, copyCell, copyPlan, copyFrom });
 
 // Wails holds back the menu's commands until its runtime says the page is ready.
 // This page doesn't load that runtime, so it says so itself.
@@ -621,8 +646,12 @@ document.addEventListener("htmx:confirm", (event) => {
 	})();
 });
 
-htmx.onLoad(mountNewPanels);
+htmx.onLoad(() => {
+	mountNewPanels();
+	drawIcons();
+});
 document.addEventListener("DOMContentLoaded", () => {
+	if (localStorage.getItem("sidebar") === "queries") showSidebar("queries");
 	restoreTabs();
 	loadSchema();
 	reconnect();

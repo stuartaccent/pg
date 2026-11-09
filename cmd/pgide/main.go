@@ -21,8 +21,8 @@ var icon []byte
 
 // The page's background, so a window has no white flash while it loads.
 var (
-	lightBackground = application.NewRGB(232, 232, 232)
-	darkBackground  = application.NewRGB(21, 25, 30)
+	lightBackground = application.NewRGB(244, 245, 247)
+	darkBackground  = application.NewRGB(16, 18, 21)
 )
 
 func main() {
