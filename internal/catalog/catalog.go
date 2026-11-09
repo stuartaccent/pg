@@ -7,6 +7,7 @@ package catalog
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -548,6 +549,33 @@ func (c *Catalog) Completions(ctx context.Context) (Completions, error) {
 		done.DefaultSchema = string(r[3])
 	}
 	return done, nil
+}
+
+// Table is what writing an update to a table needs, as the browser reads it.
+type Table struct {
+	Name    string          `json:"name"`    // schema-qualified and quoted
+	Columns json.RawMessage `json:"columns"` // quoted names by attnum
+	Key     json.RawMessage `json:"key"`     // the primary key's attnums, empty if it has none
+}
+
+// Table returns the table with the given oid.
+func (c *Catalog) Table(ctx context.Context, oid string) (Table, error) {
+	rows, err := c.read(ctx, `
+		select format('%I.%I', n.nspname, c.relname),
+			(select coalesce(json_object_agg(a.attnum, quote_ident(a.attname)), '{}') from pg_attribute a
+			 where a.attrelid = c.oid and a.attnum > 0 and not a.attisdropped),
+			(select coalesce(json_agg(k), '[]') from pg_index i, unnest(i.indkey) k
+			 where i.indrelid = c.oid and i.indisprimary)
+		from pg_class c
+		join pg_namespace n on n.oid = c.relnamespace
+		where c.oid = $1`, [][]byte{[]byte(oid)})
+	if err != nil {
+		return Table{}, err
+	}
+	if len(rows) == 0 {
+		return Table{}, errors.New("object no longer exists")
+	}
+	return Table{Name: string(rows[0][0]), Columns: rows[0][1], Key: rows[0][2]}, nil
 }
 
 // read runs sql on the catalog's connection, opening it if need be.

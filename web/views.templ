@@ -242,6 +242,8 @@ templ Index(services []string, current string, readOnly bool, j jobView, err err
 					<div class="modal-action">
 						<button type="button" class="btn btn-soft btn-sm" onclick="copyCell(this, false)">Copy value</button>
 						<button type="button" class="btn btn-soft btn-sm" onclick="copyCell(this, true)" title="As JSON, keyed by column name">Copy row as JSON</button>
+						<button type="button" class="btn btn-soft btn-sm" data-update onclick="updateCell(false)" title="Write an update for this value in a new tab">Update cell</button>
+						<button type="button" class="btn btn-soft btn-sm" data-update onclick="updateCell(true)" title="Write an update for this row in a new tab">Update row</button>
 						<form method="dialog"><button class="btn btn-sm">Close</button></form>
 					</div>
 				</div>
@@ -884,8 +886,12 @@ templ Results(p session.Page, tab string) {
 		<table class="table table-xs table-pin-rows font-mono text-[12px] [&_th]:bg-base-200 [&_th]:font-sans [&_th]:text-[11px] [&_th]:font-semibold [&_th]:text-base-content [&_:is(th,td)]:border-r [&_:is(th,td)]:border-base-content/5">
 			<thead>
 				<tr>
-					for _, c := range p.Columns {
-						<th>{ c }</th>
+					for i, c := range p.Columns {
+						if i < len(p.Sources) && p.Sources[i].Table != 0 {
+							<th data-table={ fmt.Sprint(p.Sources[i].Table) } data-attr={ fmt.Sprint(p.Sources[i].Attr) }>{ c }</th>
+						} else {
+							<th>{ c }</th>
+						}
 					}
 				</tr>
 			</thead>

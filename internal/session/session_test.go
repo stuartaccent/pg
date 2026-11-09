@@ -81,6 +81,17 @@ func TestRun(t *testing.T) {
 	}
 }
 
+func TestSources(t *testing.T) {
+	s := newTestSession(t)
+	p := s.Run("create temp table src(id int primary key, a text); select a, 1 from src")
+	if p.Err != nil {
+		t.Fatal(p.Err)
+	}
+	if len(p.Sources) != 2 || p.Sources[0].Table == 0 || p.Sources[0].Attr != 2 || p.Sources[1] != (Source{}) {
+		t.Fatalf("sources = %+v", p.Sources)
+	}
+}
+
 func TestEachStatementGetsAResult(t *testing.T) {
 	s := newTestSession(t)
 

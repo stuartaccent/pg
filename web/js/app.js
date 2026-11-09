@@ -15,6 +15,7 @@ import {
 import { fillParams, paramNames } from "./params.mjs";
 import { warningFor } from "./risky.mjs";
 import { tablesAt } from "./tables.mjs";
+import { updateSQL } from "./update.mjs";
 
 const views = new Map(); // tab id to its editor
 const language = new Compartment();
@@ -476,7 +477,25 @@ function showCell(td) {
 		}
 	}
 	document.querySelector("#cell-text").textContent = shown;
+	// Only a column straight from a table can be updated.
+	const fromTable = Boolean(headerOf(td).dataset.table);
+	for (const button of document.querySelectorAll("#cell [data-update]")) button.hidden = !fromTable;
 	showUnfocused(document.querySelector("#cell"));
+}
+
+const headerOf = (td) => td.closest("table").tHead.rows[0].cells[td.cellIndex];
+
+// updateCell opens an update for the open cell, or its row, in a new tab.
+async function updateCell(wholeRow) {
+	const td = openCell;
+	const res = await fetch(`/table?oid=${encodeURIComponent(headerOf(td).dataset.table)}`);
+	const headers = [...td.closest("table").tHead.rows[0].cells].map((th) => ({ table: th.dataset.table, attr: th.dataset.attr }));
+	const row = [...td.parentElement.cells].map((cell) => ({ text: cell.textContent, null: cell.hasAttribute("data-null") }));
+	const { sql, error } = res.ok ? updateSQL(await res.json(), headers, row, td.cellIndex, wholeRow) : { error: (await res.text()).trim() };
+	// Closed either way, so the status bar's message isn't hidden behind it.
+	document.querySelector("#cell").close();
+	if (sql) await openSQL(sql);
+	document.querySelector("#notice").textContent = error ?? "Edit the values, then Run";
 }
 
 const cellValue = (td) => (td.hasAttribute("data-null") ? "" : td.textContent);
@@ -600,7 +619,7 @@ document.addEventListener("keydown", (event) => {
 	resize(bar, sizeOf(bar) + step);
 });
 
-Object.assign(window, { toolOpen, showSidebar, fromMenu, newTab, closeActiveTab, selectTab, closeTab, closeAllTabs, useSQL, useDefinition, resetTree, formatSQL, showHistory, chooseHistory, sortHistory, showQueries, useQuery, openQueryFile, saveQuery, showActivity, showHealth, activityLive, showBackups, showRestore, closeRestore, showReplace, checkReplace, closeReplace, copyCell, copyPlan, copyFrom });
+Object.assign(window, { toolOpen, showSidebar, fromMenu, newTab, closeActiveTab, selectTab, closeTab, closeAllTabs, useSQL, useDefinition, resetTree, formatSQL, showHistory, chooseHistory, sortHistory, showQueries, useQuery, openQueryFile, saveQuery, showActivity, showHealth, activityLive, showBackups, showRestore, closeRestore, showReplace, checkReplace, closeReplace, copyCell, updateCell, copyPlan, copyFrom });
 
 // Wails holds back the menu's commands until its runtime says the page is ready.
 // This page doesn't load that runtime, so it says so itself.

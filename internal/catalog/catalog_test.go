@@ -366,6 +366,39 @@ func TestCompletions(t *testing.T) {
 	}
 }
 
+func TestTable(t *testing.T) {
+	c := newTestCatalog(t)
+	ctx := context.Background()
+	for _, sql := range []string{
+		`create temp table "Two key" (a int, dropped int, "B" text, c text, primary key ("B", a))`,
+		`alter table "Two key" drop column dropped`,
+		`create temp table nokey (a int)`,
+	} {
+		if _, err := c.read(ctx, sql, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	oids, err := c.read(ctx, `select 'pg_temp."Two key"'::regclass::oid, 'pg_temp.nokey'::regclass::oid`, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := c.Table(ctx, string(oids[0][0]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(got.Name, `."Two key"`) || !strings.Contains(string(got.Columns), `"3" : "\"B\""`) ||
+		strings.Contains(string(got.Columns), `"2"`) || string(got.Key) != "[3, 1]" {
+		t.Errorf("table = %s %s %s", got.Name, got.Columns, got.Key)
+	}
+	if got, err := c.Table(ctx, string(oids[0][1])); err != nil || string(got.Key) != "[]" {
+		t.Errorf("no key = %s, %v", got.Key, err)
+	}
+	if _, err := c.Table(ctx, "0"); err == nil {
+		t.Error("expected an error for a missing table")
+	}
+}
+
 func TestBadInput(t *testing.T) {
 	c := newTestCatalog(t)
 	if _, err := c.Children(context.Background(), "nope", ""); err == nil {

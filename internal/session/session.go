@@ -77,10 +77,18 @@ type Value struct {
 	Null bool
 }
 
+// Source is the table column a result column came from, or zeros if it
+// didn't come straight from one.
+type Source struct {
+	Table uint32 // pg_class oid
+	Attr  uint16 // attnum
+}
+
 // Page is one chunk of a query's output.
 type Page struct {
 	QueryID uint64
 	Columns []string // set on the first page only
+	Sources []Source // where each column came from, set with Columns
 	NumCols int      // set on every page
 	Rows    [][]Value
 	Total   int // rows returned so far, including this page
@@ -298,8 +306,10 @@ func (s *Session) readPage(q *query) Page {
 	if q.ncols == 0 {
 		fields := q.rr.FieldDescriptions()
 		p.Columns = make([]string, len(fields))
+		p.Sources = make([]Source, len(fields))
 		for i, f := range fields {
 			p.Columns[i] = f.Name
+			p.Sources[i] = Source{f.TableOID, f.TableAttributeNumber}
 		}
 		q.ncols = len(fields)
 	}

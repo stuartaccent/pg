@@ -101,6 +101,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /tree", s.tree)
 	mux.HandleFunc("GET /definition", s.definition)
 	mux.HandleFunc("GET /completions", s.completions)
+	mux.HandleFunc("GET /table", s.table)
 	mux.HandleFunc("GET /queries", s.queries)
 	mux.HandleFunc("POST /queries", s.saveQuery)
 	mux.HandleFunc("POST /queries/choose", s.chooseQuery)
@@ -567,6 +568,23 @@ func (s *Server) definition(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	_, _ = io.WriteString(w, def)
+}
+
+func (s *Server) table(w http.ResponseWriter, r *http.Request) {
+	cat := s.catalog()
+	if cat == nil {
+		http.Error(w, "connect to a service first", http.StatusConflict)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	table, err := cat.Table(ctx, r.FormValue("oid"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(table)
 }
 
 func (s *Server) completions(w http.ResponseWriter, r *http.Request) {
