@@ -8,9 +8,9 @@ import { keymap, placeholder } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import { formatDialect, postgresql } from "sql-formatter";
 import {
-	Activity, AlignLeft, Archive, Bookmark, Box, ChevronDown, Columns3, CopyX, Database, Download, Eye, FileCode, FilePen, Folder,
-	FolderOpen, Gauge, Hash, HeartPulse, History, KeyRound, Languages, Layers, ListTree, Play, Plus, RefreshCw, Save, Search, Server,
-	Settings, Shapes, ShieldCheck, Square, SquareFunction, SunMoon, Table2, User, Users, X, Zap, createIcons,
+	Activity, AlignLeft, Archive, Bookmark, Box, ChevronDown, Columns3, Copy, CopyX, Database, Download, Eye, FileCode, FileInput,
+	FilePen, Folder, FolderOpen, Gauge, Hash, HeartPulse, History, KeyRound, Languages, Layers, ListTree, Play, Plus, RefreshCw, Save,
+	Search, Server, Settings, Shapes, ShieldCheck, Square, SquareFunction, Star, SunMoon, Table2, Trash2, User, Users, X, Zap, createIcons,
 } from "lucide";
 import { fillParams, paramNames } from "./params.mjs";
 import { warningFor } from "./risky.mjs";
@@ -25,9 +25,9 @@ const MIN_PANE = 80; // the smallest a dragged pane gets; what's beside it keeps
 // The icons the page uses, bundled so they work offline. The markup asks for
 // one with <i data-lucide="name">; createIcons swaps it for the SVG.
 const icons = {
-	Activity, AlignLeft, Archive, Bookmark, Box, ChevronDown, Columns3, CopyX, Database, Download, Eye, FileCode, FilePen, Folder,
-	FolderOpen, Gauge, Hash, HeartPulse, History, KeyRound, Languages, Layers, ListTree, Play, Plus, RefreshCw, Save, Search, Server,
-	Settings, Shapes, ShieldCheck, Square, SquareFunction, SunMoon, Table2, User, Users, X, Zap,
+	Activity, AlignLeft, Archive, Bookmark, Box, ChevronDown, Columns3, Copy, CopyX, Database, Download, Eye, FileCode, FileInput,
+	FilePen, Folder, FolderOpen, Gauge, Hash, HeartPulse, History, KeyRound, Languages, Layers, ListTree, Play, Plus, RefreshCw, Save,
+	Search, Server, Settings, Shapes, ShieldCheck, Square, SquareFunction, Star, SunMoon, Table2, Trash2, User, Users, X, Zap,
 };
 const drawIcons = () => createIcons({ icons, attrs: { "aria-hidden": "true" } });
 
@@ -103,11 +103,13 @@ function mount(panel) {
 		],
 	});
 	views.set(panel.dataset.tab, view);
-	selectTab(panel.dataset.tab);
+	// Restored tabs open behind, so whatever was chosen meanwhile stays in front.
+	if (restoring) panel.hidden = true;
+	else selectTab(panel.dataset.tab);
 }
 
 // The server tools, which open as tabs of their own beside the query tabs.
-const tools = ["activity", "health", "backups"];
+const tools = ["activity", "health", "backups", "history"];
 
 // Selects a query tab or a tool. activeTab stays a query tab, as the
 // editor's commands act on it.
@@ -116,6 +118,7 @@ function selectTab(id) {
 	if (!tool) activeTab = id;
 	for (const panel of document.querySelectorAll("[data-tool-panel]")) panel.hidden = panel.id !== `${id}-panel`;
 	for (const panel of document.querySelectorAll("[data-tab]")) panel.hidden = tool || panel.dataset.tab !== id;
+	for (const button of document.querySelectorAll("[data-tool-button]")) button.setAttribute("aria-pressed", button.dataset.toolButton === id);
 	for (const tab of document.querySelectorAll("[data-tab-button]")) {
 		const active = tab.dataset.tabButton === id;
 		tab.classList.toggle("tab-active", active);
@@ -239,23 +242,33 @@ function setText(view, text) {
 	view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } });
 }
 
+// Each htmx.ajax names its own source: without one they all share <body>, and
+// htmx then queues a second request but resolves its promise at once, so
+// awaiting newTab while a tool loaded went on before the tab existed.
 const newTab = async () => {
-	await htmx.ajax("POST", "/tabs", { target: "#panels", swap: "beforeend" });
+	await htmx.ajax("POST", "/tabs", { source: "#panels", target: "#panels", swap: "beforeend" });
 	mountNewPanels();
 };
 
 // Brings back the SQL from last time, one tab each. A page load always starts
 // with a single empty tab from the server.
+let restoring = false;
+
 async function restoreTabs() {
 	mountNewPanels();
 	restoreSizes();
-	const first = activeTab;
 	const saved = JSON.parse(localStorage.getItem("tabs") ?? "[]").filter(Boolean);
-	for (const [i, text] of saved.entries()) {
-		if (i > 0) await newTab();
-		setText(views.get(activeTab), text);
+	restoring = true;
+	try {
+		for (const [i, text] of saved.entries()) {
+			if (i > 0) await newTab();
+			setText([...views.values()].at(-1), text);
+		}
+	} finally {
+		restoring = false;
 	}
-	selectTab(first);
+	// The first tab, unless another was clicked meanwhile, or a tool opened.
+	if (!toolShowing()) selectTab(activeTab);
 }
 
 function mountNewPanels() {
@@ -302,7 +315,7 @@ function showUnfocused(dialog) {
 
 async function showBackups() {
 	openTool("backups");
-	await htmx.ajax("GET", "/backups", { target: "#backups-body" });
+	await htmx.ajax("GET", "/backups", { source: "#backups-body", target: "#backups-body" });
 }
 
 // Shows a view in the sidebar: "tree", or "queries", which reloads its list
@@ -311,7 +324,7 @@ function showSidebar(name) {
 	for (const view of document.querySelectorAll("[data-sidebar]")) view.hidden = view.dataset.sidebar !== name;
 	for (const button of document.querySelectorAll("[data-sidebar-button]")) button.setAttribute("aria-pressed", button.dataset.sidebarButton === name);
 	localStorage.setItem("sidebar", name);
-	if (name === "queries") return htmx.ajax("GET", "/queries", { target: "#queries-body" });
+	if (name === "queries") return htmx.ajax("GET", "/queries", { source: "#queries-body", target: "#queries-body" });
 }
 
 const showQueries = () => showSidebar("queries");
@@ -378,7 +391,7 @@ document.addEventListener("query-saved", () => {
 // Each tool opens its tab, or goes to it, and refreshes it now.
 async function showActivity() {
 	openTool("activity");
-	await htmx.ajax("GET", "/activity", { target: "#activity-body" });
+	await htmx.ajax("GET", "/activity", { source: "#activity-body", target: "#activity-body" });
 }
 
 // Opens at once with a spinner, as the checks can take a moment on a big database.
@@ -386,7 +399,7 @@ async function showHealth() {
 	const body = document.querySelector("#health-body");
 	body.innerHTML = '<span class="loading loading-spinner loading-sm"></span>';
 	openTool("health");
-	await htmx.ajax("GET", "/health", { target: body });
+	await htmx.ajax("GET", "/health", { source: body, target: body });
 }
 
 // Whether the list can refresh: only while showing. Not under a dialog:
@@ -424,9 +437,9 @@ const closeRestore = () => document.querySelector("#restore").close();
 
 async function showHistory() {
 	const body = document.querySelector("#history-body");
-	body.innerHTML = '<span class="loading loading-spinner loading-sm"></span>';
-	showUnfocused(document.querySelector("#history"));
-	await htmx.ajax("GET", "/history", { target: body });
+	body.innerHTML = '<span class="loading loading-spinner loading-sm m-3"></span>';
+	openTool("history");
+	await htmx.ajax("GET", "/history", { source: body, target: body });
 	document.querySelector("#history-search")?.focus();
 }
 

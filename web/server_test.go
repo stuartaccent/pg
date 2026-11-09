@@ -1277,7 +1277,7 @@ func TestCheck(t *testing.T) {
 	}
 }
 
-func TestHistoryDialog(t *testing.T) {
+func TestHistoryTab(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	s := New()
 	t.Cleanup(s.Close)
@@ -1310,12 +1310,12 @@ func TestHistoryDialog(t *testing.T) {
 	if w.Code != http.StatusNoContent || w.Header().Get("HX-Trigger") != "history-changed" {
 		t.Fatalf("star: %d %q", w.Code, w.Header().Get("HX-Trigger"))
 	}
-	// The note is already on screen, so the dialog needn't reload to show it.
+	// The note is already on screen, so History needn't reload to show it.
 	if w := send(http.MethodPost, "/history/1/note", url.Values{"note": {"by id"}}); w.Code != http.StatusNoContent || w.Header().Get("HX-Trigger") != "" {
 		t.Errorf("note: %d %q", w.Code, w.Header().Get("HX-Trigger"))
 	}
 	body = send(http.MethodGet, "/history/1", nil).Body.String()
-	for _, want := range []string{"★", "by id", "<td>app</td>", "and 2 earlier runs"} {
+	for _, want := range []string{`aria-label="Unstar"`, "by id", "<td>app</td>", "and 2 earlier runs"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("detail lacks %q", want)
 		}

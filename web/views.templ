@@ -65,11 +65,11 @@ templ Index(services []string, current string, readOnly bool, j jobView, err err
 			</header>
 			<div class="flex flex-1 min-h-0">
 				<!-- The rail picks what the sidebar shows. History has more to show than
-				     fits beside the editor, so it keeps its dialog. -->
+				     fits beside the editor, so it opens as a tab. -->
 				<nav class="flex w-11 shrink-0 flex-col items-center gap-1 border-r border-base-content/10 bg-base-200 py-2" aria-label="Sidebar">
-					@railButton("Explorer", "database", "tree", `showSidebar("tree")`)
-					@railButton("Saved queries", "bookmark", "queries", `showSidebar("queries")`)
-					@railButton("History", "history", "", "showHistory()")
+					@railButton("Explorer", "database", "tree", "", `showSidebar("tree")`)
+					@railButton("Saved queries", "bookmark", "queries", "", `showSidebar("queries")`)
+					@railButton("History", "history", "", "history", "showHistory()")
 				</nav>
 				<aside class="flex w-(--sidebar-width) shrink-0 flex-col overflow-hidden bg-base-200" aria-label="Sidebar">
 					<section data-sidebar="tree" class="flex min-h-0 flex-1 flex-col">
@@ -78,7 +78,7 @@ templ Index(services []string, current string, readOnly bool, j jobView, err err
 							<button type="button" class="btn btn-square btn-ghost btn-xs" aria-label="Refresh tree" title="Refresh" hx-get={ treeURL(catalog.RootKind, "") } hx-target="#tree" onclick="resetTree()"><i data-lucide="refresh-cw" class="size-3.5"></i></button>
 						</div>
 						<div class="shrink-0 px-2 pb-2">
-							<label class="input input-xs w-full bg-base-100/60">
+							<label class="input input-xs w-full bg-base-100/60 focus-within:outline-1 focus-within:outline-offset-0">
 								<i data-lucide="search" class="size-3 opacity-50" aria-hidden="true"></i>
 								<input
 									id="tree-search"
@@ -118,6 +118,7 @@ templ Index(services []string, current string, readOnly bool, j jobView, err err
 							@toolTab("activity", "Activity", "activity")
 							@toolTab("health", "Health", "heart-pulse")
 							@toolTab("backups", "Backups", "archive")
+							@toolTab("history", "History", "history")
 						</div>
 						<button type="button" class="btn btn-square btn-ghost btn-xs mx-1 self-center" aria-label="New query tab" title="New tab (⌘T)" hx-post="/tabs" hx-target="#panels" hx-swap="beforeend"><i data-lucide="plus" class="size-3.5"></i></button>
 						<button type="button" class="btn btn-square btn-ghost btn-xs ml-auto mr-1 self-center" aria-label="Close all tabs" title="Close all tabs" onclick="closeAllTabs()"><i data-lucide="copy-x" class="size-3.5"></i></button>
@@ -140,6 +141,9 @@ templ Index(services []string, current string, readOnly bool, j jobView, err err
 						<section id="backups-panel" data-tool-panel class="flex-1 min-w-0 min-h-0 overflow-auto bg-base-100 p-4 select-text" hidden>
 							<!-- A finished job may have made a backup or a sandbox. -->
 							<div id="backups-body" class="max-w-5xl" hx-get="/backups" hx-trigger="services-changed[toolOpen('backups')] from:body"></div>
+						</section>
+						<section id="history-panel" data-tool-panel class="flex flex-1 min-w-0 min-h-0 flex-col bg-base-100" hidden>
+							<div id="history-body" class="flex flex-1 min-h-0 flex-col"></div>
 						</section>
 					</div>
 				</div>
@@ -243,20 +247,14 @@ templ Index(services []string, current string, readOnly bool, j jobView, err err
 				</div>
 				<form method="dialog" class="modal-backdrop"><button aria-label="Close">close</button></form>
 			</dialog>
-			<dialog id="history" class="modal">
-				<div class="modal-box w-[90vw] max-w-[90vw]">
-					<h3 class="font-medium">History</h3>
-					<div id="history-body" class="mt-2"></div>
-				</div>
-				<form method="dialog" class="modal-backdrop"><button aria-label="Close">close</button></form>
-			</dialog>
 		</body>
 	</html>
 }
 
 // railButton is one of the icons down the left. With a view, it switches the
-// sidebar to it, and shows whether that's the one showing.
-templ railButton(label, icon, view, action string) {
+// sidebar to it; with a tool, it opens that tool's tab. Either way it shows
+// whether that's the one showing.
+templ railButton(label, icon, view, tool, action string) {
 	<div class="tooltip tooltip-right" data-tip={ label }>
 		<button
 			type="button"
@@ -265,6 +263,10 @@ templ railButton(label, icon, view, action string) {
 			if view != "" {
 				data-sidebar-button={ view }
 				aria-pressed={ fmt.Sprint(view == "tree") }
+			}
+			if tool != "" {
+				data-tool-button={ tool }
+				aria-pressed="false"
 			}
 			onclick={ templ.JSUnsafeFuncCall(action) }
 		>
@@ -1023,41 +1025,45 @@ func summaryText(p session.Page) string {
 	return strings.Join(parts, " · ")
 }
 
-// HistoryBody is the History dialog: filters and entries on the left, the
-// chosen entry on the right. Only the list reloads as the filters change, so
+// HistoryBody is the History tab: filters over the entries on the left, the
+// chosen entry beside them. Only the list reloads as the filters change, so
 // the search box keeps its focus.
 templ HistoryBody(services []string, entries []history.Entry, err error) {
 	if err != nil {
-		<p class="text-error whitespace-pre-wrap">{ err.Error() }</p>
+		<p class="text-error whitespace-pre-wrap px-3 py-2">{ err.Error() }</p>
 	} else {
-		<div class="grid grid-cols-[3fr_2fr] gap-4 h-[65vh]">
-			<form class="flex flex-col min-h-0" hx-get="/history/list" hx-target="#history-list" hx-trigger="input delay:200ms, history-changed from:body" onsubmit="event.preventDefault()">
+		<div class="flex flex-1 min-h-0">
+			<form class="flex flex-1 min-w-0 flex-col" hx-get="/history/list" hx-target="#history-list" hx-trigger="input delay:200ms, history-changed from:body" onsubmit="event.preventDefault()">
 				<input type="hidden" name="sort" value=""/>
 				<input type="hidden" name="selected" value=""/>
-				<div class="flex items-center gap-2 mb-2 shrink-0">
-					<input id="history-search" name="q" type="search" class="input input-sm flex-1" placeholder="Search SQL and notes…" aria-label="Search history"/>
-					<select name="service" class="select select-sm w-48" aria-label="Service">
+				<div class="flex h-10 shrink-0 items-center gap-2 border-b border-base-content/10 px-2">
+					<label class="input input-sm w-full max-w-sm focus-within:outline-1 focus-within:outline-offset-0">
+						<i data-lucide="search" class="size-3.5 opacity-50"></i>
+						<input id="history-search" name="q" type="search" placeholder="Search SQL and notes…" aria-label="Search history"/>
+					</label>
+					<select name="service" class="select select-sm w-44" aria-label="Service">
 						<option value="">All services</option>
 						for _, service := range services {
 							<option>{ service }</option>
 						}
 					</select>
-					<label class="label text-sm gap-1 shrink-0"><input type="checkbox" name="starred" class="checkbox checkbox-sm"/> Starred</label>
-					<details class="dropdown dropdown-end">
-						<summary class="btn btn-ghost btn-sm">Clear</summary>
-						<ul class="menu dropdown-content z-10 w-48 rounded-box bg-base-200 shadow-md">
+					<label class="label gap-1.5 shrink-0 text-xs text-base-content"><input type="checkbox" name="starred" class="checkbox checkbox-xs"/> Starred only</label>
+					<details class="dropdown dropdown-end ml-auto">
+						<summary class="btn btn-ghost btn-sm gap-1.5"><i data-lucide="trash-2" class="size-3.5"></i>Clear</summary>
+						<ul class="menu menu-sm dropdown-content z-10 mt-1 w-48 rounded-box border border-base-content/10 bg-base-200 p-1 shadow-xl">
 							<li><button type="button" hx-post="/history/clear" hx-vals={ `{"days":"30"}` } hx-swap="none" data-confirm="Clear runs older than 30 days? Starred queries stay." onclick="this.closest('details').open = false">Older than 30 days</button></li>
 							<li><button type="button" hx-post="/history/clear" hx-vals={ `{"days":"90"}` } hx-swap="none" data-confirm="Clear runs older than 90 days? Starred queries stay." onclick="this.closest('details').open = false">Older than 90 days</button></li>
 							<li><button type="button" class="text-error" hx-post="/history/clear" hx-vals={ `{"days":"all"}` } hx-swap="none" data-confirm="Clear all history? Starred queries stay, without their runs." onclick="this.closest('details').open = false">Everything</button></li>
 						</ul>
 					</details>
 				</div>
-				<div id="history-list" class="flex-1 min-h-0 overflow-auto">
+				<div id="history-list" class="results flex-1 min-h-0 overflow-auto select-text">
 					@HistoryList(entries, "", 0, nil)
 				</div>
 			</form>
-			<div id="history-detail" class="flex flex-col min-h-0 overflow-auto rounded-box bg-base-200 p-3">
-				<p class="text-sm text-base-content/50">Choose a query to see its runs.</p>
+			<!-- Outside the form, so typing a note doesn't reload the list. -->
+			<div id="history-detail" class="flex w-[min(36rem,40%)] shrink-0 flex-col min-h-0 border-l border-base-content/10 bg-base-200 select-text">
+				<p class="px-3 py-2 text-xs text-base-content/50">Choose a query to see its runs.</p>
 			</div>
 		</div>
 	}
@@ -1067,11 +1073,11 @@ templ HistoryBody(services []string, entries []history.Entry, err error) {
 // one whose detail is showing marked.
 templ HistoryList(entries []history.Entry, sort string, selected int64, err error) {
 	if err != nil {
-		<p class="text-error text-sm whitespace-pre-wrap">{ err.Error() }</p>
+		<p class="text-error text-xs whitespace-pre-wrap px-3 py-2">{ err.Error() }</p>
 	} else if len(entries) == 0 {
-		<p class="text-sm text-base-content/50 py-1">Nothing found.</p>
+		<p class="text-xs text-base-content/50 px-3 py-2">Nothing found.</p>
 	} else {
-		<table class="table table-sm table-pin-rows text-xs">
+		<table class="table table-xs table-pin-rows text-xs [&_th]:bg-base-200 [&_th]:text-[11px] [&_th]:font-semibold [&_th]:text-base-content">
 			<thead>
 				<tr>
 					<th class="w-8"><span class="sr-only">Starred</span></th>
@@ -1086,7 +1092,7 @@ templ HistoryList(entries []history.Entry, sort string, selected int64, err erro
 					<!-- The SQL's button stretches over the row, so a click anywhere opens it,
 					     and so does Tab then Enter. The star sits above it. -->
 					<tr
-						class="relative hover:bg-base-200/60 aria-current:bg-base-200 aria-current:shadow-[inset_3px_0_0_var(--color-primary)]"
+						class="relative hover:bg-base-200/60 aria-current:bg-primary/10 aria-current:shadow-[inset_2px_0_0_var(--color-primary)]"
 						if e.ID == selected {
 							aria-current="true"
 						}
@@ -1095,7 +1101,7 @@ templ HistoryList(entries []history.Entry, sort string, selected int64, err erro
 						<td class="max-w-[40vw]">
 							<button
 								type="button"
-								class="block w-full truncate text-left font-mono cursor-pointer after:absolute after:inset-0"
+								class="block w-full truncate text-left font-mono cursor-pointer after:absolute after:inset-0 focus-visible:outline-none"
 								title={ e.SQL }
 								data-id={ fmt.Sprint(e.ID) }
 								hx-get={ fmt.Sprintf("/history/%d", e.ID) }
@@ -1111,17 +1117,17 @@ templ HistoryList(entries []history.Entry, sort string, selected int64, err erro
 			</tbody>
 		</table>
 		if len(entries) == history.ShowMost {
-			<p class="text-xs text-base-content/50 py-1">Showing the first { fmt.Sprint(history.ShowMost) }: search to narrow them down.</p>
+			<p class="text-xs text-base-content/50 px-3 py-2">Showing the first { fmt.Sprint(history.ShowMost) }: search to narrow them down.</p>
 		}
 	}
 }
 
 // sortButton heads a column that the list can be sorted by.
 templ sortButton(label, by, sort string) {
-	<button type="button" class={ "cursor-pointer hover:underline", templ.KV("font-semibold", by == sort) } onclick={ templ.JSUnsafeFuncCall(fmt.Sprintf("sortHistory(this, %q)", by)) }>
+	<button type="button" class={ "inline-flex items-center gap-0.5 cursor-pointer hover:underline", templ.KV("text-primary", by == sort) } onclick={ templ.JSUnsafeFuncCall(fmt.Sprintf("sortHistory(this, %q)", by)) }>
 		{ label }
 		if by == sort {
-			▾
+			<i data-lucide="chevron-down" class="size-3"></i>
 		}
 	</button>
 }
@@ -1144,9 +1150,9 @@ templ starButton(e history.Entry, size string) {
 		hx-swap="none"
 	>
 		if e.Starred {
-			<span class="text-warning">★</span>
+			<i data-lucide="star" class="size-3.5 fill-current text-warning"></i>
 		} else {
-			☆
+			<i data-lucide="star" class="size-3.5 opacity-40"></i>
 		}
 	</button>
 }
@@ -1154,40 +1160,43 @@ templ starButton(e history.Entry, size string) {
 // HistoryDetail is one entry, with its note and runs. It reloads itself when
 // anything in the history changes, such as its star.
 templ HistoryDetail(e history.Entry, runs []history.Run, err error) {
-	<!-- The SQL takes whatever height the runs leave, and scrolls in it. -->
 	<div class="flex flex-col flex-1 min-h-0" hx-get={ fmt.Sprintf("/history/%d", e.ID) } hx-trigger="history-changed from:body" hx-swap="outerHTML">
 		if err != nil {
-			<p class="text-sm text-base-content/50">{ err.Error() }</p>
+			<p class="px-3 py-2 text-xs text-base-content/50">{ err.Error() }</p>
 		} else {
-			<div class="flex items-center gap-1 mb-2 shrink-0">
+			<div class="flex h-10 shrink-0 items-center gap-1 border-b border-base-content/10 px-2">
 				@starButton(e, "btn-sm")
-				<button type="button" class="btn btn-primary btn-sm" data-sql={ e.SQL } onclick="document.querySelector('#history').close(); useSQL(event, this)">Open</button>
-				<button type="button" class="btn btn-ghost btn-sm" data-copy={ e.SQL } onclick="copyFrom(this)">Copy</button>
-				<button type="button" class="btn btn-ghost btn-sm text-error ml-auto" hx-delete={ fmt.Sprintf("/history/%d", e.ID) } hx-swap="none" data-confirm={ fmt.Sprintf("Remove this query and its %d runs from history?", e.Runs) }>Remove</button>
+				<button type="button" class="btn btn-primary btn-sm gap-1.5" data-sql={ e.SQL } onclick="useSQL(event, this)"><i data-lucide="file-input" class="size-3.5"></i>Open</button>
+				<button type="button" class="btn btn-ghost btn-sm gap-1.5" data-copy={ e.SQL } onclick="copyFrom(this)"><i data-lucide="copy" class="size-3.5"></i>Copy</button>
+				<button type="button" class="btn btn-ghost btn-sm gap-1.5 text-error ml-auto" hx-delete={ fmt.Sprintf("/history/%d", e.ID) } hx-swap="none" data-confirm={ fmt.Sprintf("Remove this query and its %d runs from history?", e.Runs) }><i data-lucide="trash-2" class="size-3.5"></i>Remove</button>
 			</div>
-			<pre class="flex-1 min-h-24 font-mono text-xs whitespace-pre-wrap bg-base-100 rounded-box p-2 overflow-auto">{ e.SQL }</pre>
-			<textarea name="note" class="textarea textarea-sm w-full mt-2 shrink-0 transition-colors duration-500" rows="2" placeholder="Note, saved when you leave the box" aria-label="Note" hx-post={ fmt.Sprintf("/history/%d/note", e.ID) } hx-trigger="change" hx-swap="none">{ e.Note }</textarea>
-			<table class="table table-sm text-xs mt-2 shrink-0">
-				<thead>
-					<tr><th>Ran</th><th>Service</th><th>Database</th></tr>
-				</thead>
-				<tbody>
-					for _, run := range runs {
-						<tr>
-							<td class="whitespace-nowrap">{ ranAt(run.At) }</td>
-							<td>{ run.Service }</td>
-							<td>{ run.Database }</td>
-						</tr>
-					}
-				</tbody>
-			</table>
-			if len(runs) == 0 {
-				<p class="text-xs text-base-content/50 py-1">Its runs have been cleared, but it's starred, so it stays.</p>
-			} else if earlier := e.Runs - len(runs); earlier == 1 {
-				<p class="text-xs text-base-content/50 py-1 shrink-0">and 1 earlier run</p>
-			} else if earlier > 1 {
-				<p class="text-xs text-base-content/50 py-1 shrink-0">and { fmt.Sprint(earlier) } earlier runs</p>
-			}
+			<!-- The SQL takes whatever height the runs leave, and scrolls in it. -->
+			<div class="flex flex-1 min-h-0 flex-col p-3">
+				<pre class="flex-1 min-h-24 font-mono text-xs whitespace-pre-wrap bg-base-100 border border-base-content/10 rounded-box p-2 overflow-auto">{ e.SQL }</pre>
+				<textarea name="note" class="textarea textarea-sm w-full mt-2 shrink-0 transition-colors duration-500" rows="2" placeholder="Note, saved when you leave the box" aria-label="Note" hx-post={ fmt.Sprintf("/history/%d/note", e.ID) } hx-trigger="change" hx-swap="none">{ e.Note }</textarea>
+				<h3 class="mt-3 mb-1 shrink-0 text-[11px] font-semibold uppercase tracking-wider text-base-content/50">Recent runs</h3>
+				<table class="table table-xs text-xs shrink-0">
+					<thead>
+						<tr><th>Ran</th><th>Service</th><th>Database</th></tr>
+					</thead>
+					<tbody>
+						for _, run := range runs {
+							<tr>
+								<td class="whitespace-nowrap">{ ranAt(run.At) }</td>
+								<td>{ run.Service }</td>
+								<td>{ run.Database }</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+				if len(runs) == 0 {
+					<p class="text-xs text-base-content/50 py-1">Its runs have been cleared, but it's starred, so it stays.</p>
+				} else if earlier := e.Runs - len(runs); earlier == 1 {
+					<p class="text-xs text-base-content/50 py-1 shrink-0">and 1 earlier run</p>
+				} else if earlier > 1 {
+					<p class="text-xs text-base-content/50 py-1 shrink-0">and { fmt.Sprint(earlier) } earlier runs</p>
+				}
+			</div>
 		}
 	</div>
 }

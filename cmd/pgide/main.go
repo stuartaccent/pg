@@ -145,7 +145,7 @@ func appMenu(app *application.App) *application.Menu {
 	add("Save Query…", "CmdOrCtrl+S", "saveQuery")
 	add("Saved Queries…", "", "showQueries")
 	add("Open Query File…", "CmdOrCtrl+O", "openQueryFile")
-	add("History…", "", "showHistory")
+	add("History", "", "showHistory")
 	file.AddSeparator()
 	add("Activity", "", "showActivity")
 	add("Health", "", "showHealth")
