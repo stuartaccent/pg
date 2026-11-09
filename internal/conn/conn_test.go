@@ -79,6 +79,7 @@ func TestExport(t *testing.T) {
 		{name: "trailing comment", query: "select 1 as a -- note", want: "a\n1\n", wantRows: 1},
 		{name: "null", query: "select null::int as a", want: "a\n\n", wantRows: 1},
 		{name: "semicolon then comment", query: "select 1 as a; -- note\n-- another\n", want: "a\n1\n", wantRows: 1},
+		{name: "two statements", query: "select 1; select 2", wantErr: "one query at a time"},
 		{name: "bad sql", query: "select nope", wantErr: "nope"},
 		// where false, so this changes nothing even if the guard were to fail.
 		{name: "a write is refused", query: "update pg_description set description = description where false returning 1", wantErr: "read-only"},

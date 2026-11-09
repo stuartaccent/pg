@@ -253,8 +253,8 @@ func TestExplain(t *testing.T) {
 	}
 
 	// A second statement must be refused, not run.
-	if p := s.Explain("select 1; delete from explained", false); p.Err == nil {
-		t.Fatal("two statements: want an error")
+	if p := s.Explain("select 1; delete from explained", false); !errors.Is(p.Err, ErrOneStatement) {
+		t.Fatalf("two statements: err = %v", p.Err)
 	}
 	p = s.Run("select count(*) from explained")
 	if p.Err != nil || p.Rows[0][0].Text != "1" {
@@ -456,12 +456,13 @@ func TestCopyToTheClientIsRefused(t *testing.T) {
 		"COPY t (a, b) FROM STDIN WITH (FORMAT csv)",
 		"copy (select 1) to stdout",
 		"select 1; copy t from stdin",
+		"/* x */ copy t to stdout",
 	} {
 		if p := s.Run(sql); !errors.Is(p.Err, ErrCopy) {
 			t.Errorf("%q: err = %v", sql, p.Err)
 		}
 	}
-	for _, sql := range []string{"select 'copy to stdout'", "select 1 as copy"} {
+	for _, sql := range []string{"select 'copy to stdout'", "select 1 as copy", "select ';copy t from stdin'"} {
 		if p := s.Run(sql); p.Err != nil {
 			t.Errorf("%q: %v", sql, p.Err)
 		}

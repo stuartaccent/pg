@@ -13,7 +13,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -21,6 +20,7 @@ import (
 	"github.com/jackc/pgservicefile"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgconn/ctxwatch"
+	pg_query "github.com/pganalyze/pg_query_go/v6"
 )
 
 // ServiceFilePath returns the service file libpq would read: $PGSERVICEFILE,
@@ -169,21 +169,26 @@ func ReadOnly(c *pgconn.PgConn) bool {
 	return c.ParameterStatus("default_transaction_read_only") == "on"
 }
 
-// statementEnd is a final semicolon, and any comment lines after it, which
-// can't go inside the brackets of a copy.
-var statementEnd = regexp.MustCompile(`;\s*(--[^\n]*\s*)*$`)
-
 // Export streams the rows of query to w as CSV and returns how many there were.
 //
 // Exporting has to run the query again, so it does so in a read-only
 // transaction: one that writes fails, rather than writing twice. It leaves the
 // transaction open, so c is for closing afterwards.
 func Export(ctx context.Context, c *pgconn.PgConn, query string, w io.Writer) (int64, error) {
+	// Splitting drops a final semicolon and comments after it, which can't go
+	// inside the brackets of a copy. SQL it can't scan is left for the server.
+	if stmts, err := pg_query.SplitWithScanner(query, true); err == nil {
+		if len(stmts) > 1 {
+			return 0, errors.New("export runs one query at a time: select just the one to export")
+		}
+		if len(stmts) == 1 {
+			query = stmts[0]
+		}
+	}
 	if _, err := c.Exec(ctx, "begin read only").ReadAll(); err != nil {
 		return 0, err
 	}
 	// The newline stops a trailing -- comment swallowing the closing bracket.
-	query = statementEnd.ReplaceAllString(query, "")
 	tag, err := c.CopyTo(ctx, w, "copy (\n"+query+"\n) to stdout with (format csv, header)")
 	return tag.RowsAffected(), err
 }

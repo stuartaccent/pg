@@ -251,10 +251,14 @@ function formatSQL() {
 	}
 }
 
-const loadHistory = () => JSON.parse(localStorage.getItem("history") ?? "[]");
+// Entries were once just the SQL, before they had fingerprints.
+const loadHistory = () => JSON.parse(localStorage.getItem("history") ?? "[]").map((entry) => (typeof entry === "string" ? { sql: entry } : entry));
 
-function remember(sql) {
-	let history = [sql, ...loadHistory().filter((entry) => entry !== sql)].slice(0, MAX_HISTORY);
+// remember puts sql first in History, in place of any entry with the same
+// fingerprint, so a query run with other values or layout keeps one entry.
+function remember(sql, fingerprint) {
+	const same = (entry) => entry.sql === sql || (fingerprint && entry.fingerprint === fingerprint);
+	let history = [{ sql, fingerprint }, ...loadHistory().filter((entry) => !same(entry))].slice(0, MAX_HISTORY);
 	while (history.length > 1 && JSON.stringify(history).length > MAX_HISTORY_CHARS) {
 		history = history.slice(0, Math.ceil(history.length * 0.9));
 	}
@@ -389,7 +393,7 @@ function closeRestore() {
 }
 
 function forget(sql) {
-	localStorage.setItem("history", JSON.stringify(loadHistory().filter((entry) => entry !== sql)));
+	localStorage.setItem("history", JSON.stringify(loadHistory().filter((entry) => entry.sql !== sql)));
 	renderHistory();
 	document.querySelector("#history-search").focus();
 }
@@ -398,7 +402,7 @@ function renderHistory() {
 	const term = document.querySelector("#history-search").value.toLowerCase();
 	const list = document.querySelector("#history-list");
 	const history = loadHistory();
-	const found = history.filter((sql) => sql.toLowerCase().includes(term));
+	const found = history.filter(({ sql }) => sql.toLowerCase().includes(term));
 	if (found.length === 0) {
 		const empty = document.createElement("li");
 		empty.className = "text-base-content/50 text-sm py-1";
@@ -406,7 +410,7 @@ function renderHistory() {
 		list.replaceChildren(empty);
 		return;
 	}
-	list.replaceChildren(...found.map((sql) => {
+	list.replaceChildren(...found.map(({ sql }) => {
 		const item = document.createElement("li");
 		item.className = "flex items-center gap-2";
 		const button = document.createElement("button");
@@ -566,6 +570,19 @@ document.addEventListener("click", (event) => {
 // The values given for each tab's :names, for htmx:configRequest to use. Export
 // asks before its Save dialog, so they have to wait for its second request.
 const paramValues = new Map();
+// The fingerprint of each tab's query as it last ran, for History.
+const fingerprints = new Map();
+
+// check asks the server about sql before it runs. If it can't, the query
+// itself fails too, so there's nothing to warn about.
+async function check(sql) {
+	try {
+		const response = await fetch("/check", { method: "POST", body: new URLSearchParams({ sql }) });
+		return response.ok ? await response.json() : {};
+	} catch {
+		return {};
+	}
+}
 
 // <details> menus only close by clicking their own button, unlike a real menu.
 const closeMenus = (except) => {
@@ -583,7 +600,7 @@ document.addEventListener("htmx:configRequest", (event) => {
 	const sql = sqlToRun(elt);
 	formData.set("sql", fillParams(sql, paramValues.get(elt.closest("[data-tab]").dataset.tab) ?? {}));
 	// As typed, so running it again from History asks again.
-	if (path === "/query" && sql.trim()) remember(sql.trim());
+	if (path === "/query" && sql.trim()) remember(sql.trim(), fingerprints.get(elt.closest("[data-tab]").dataset.tab));
 });
 
 // Counts up beside Running…, to tell a slow query from a stuck one.
@@ -616,13 +633,20 @@ document.addEventListener("htmx:confirm", (event) => {
 	if (!isQuery && !elt.matches("[hx-post='/export/choose']")) return;
 	const sql = sqlToRun(elt);
 	const names = paramNames(sql);
-	const warning = isQuery ? warningFor(triggeringEvent?.submitter?.value, sql) : "";
-	if (names.length === 0 && !warning) return;
+	if (!isQuery && names.length === 0) return;
 	event.preventDefault();
 	(async () => {
+		const tab = elt.closest("[data-tab]").dataset.tab;
 		const values = names.length > 0 ? await askParams(names) : {};
-		if (!values || (warning && !(await ask(warning)))) return;
-		paramValues.set(elt.closest("[data-tab]").dataset.tab, values);
+		if (!values) return;
+		if (isQuery) {
+			// Filled in, as :names aren't SQL the server can parse.
+			const { everyRow, fingerprint } = await check(fillParams(sql, values));
+			const warning = warningFor(triggeringEvent?.submitter?.value, everyRow);
+			if (warning && !(await ask(warning))) return;
+			fingerprints.set(tab, fingerprint);
+		}
+		paramValues.set(tab, values);
 		event.detail.issueRequest(true);
 	})();
 });

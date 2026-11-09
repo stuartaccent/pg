@@ -21,6 +21,7 @@ import (
 
 	"github.com/a-h/templ"
 	"github.com/jackc/pgx/v5/pgconn"
+	pg_query "github.com/pganalyze/pg_query_go/v6"
 
 	"pg/internal/catalog"
 	"pg/internal/conn"
@@ -85,6 +86,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /query", s.query)
 	mux.HandleFunc("GET /query/{id}/more", s.more)
 	mux.HandleFunc("POST /cancel", s.cancel)
+	mux.HandleFunc("POST /check", s.check)
 	mux.HandleFunc("POST /export/choose", s.chooseExport)
 	mux.HandleFunc("POST /export", s.export)
 	mux.HandleFunc("GET /tree", s.tree)
@@ -378,6 +380,49 @@ func (s *Server) cancel(w http.ResponseWriter, r *http.Request) {
 		sess.Cancel()
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// check is what the page asks about sql before running it: whether it writes
+// to every row, and its fingerprint, which History uses to keep one entry per
+// query whatever its values or layout. SQL that doesn't parse gets neither.
+func (s *Server) check(w http.ResponseWriter, r *http.Request) {
+	sql := r.FormValue("sql")
+	fingerprint, _ := pg_query.Fingerprint(sql)
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"everyRow": writesEveryRow(sql), "fingerprint": fingerprint})
+}
+
+// writesEveryRow reports whether sql has an update or delete with no where,
+// anywhere, including inside a with.
+func writesEveryRow(sql string) bool {
+	tree, err := pg_query.ParseToJSON(sql)
+	if err != nil {
+		return false
+	}
+	var node any
+	if err := json.Unmarshal([]byte(tree), &node); err != nil {
+		return false
+	}
+	return anyWithoutWhere(node)
+}
+
+// anyWithoutWhere walks a parse tree, as JSON, for an UpdateStmt or DeleteStmt
+// with no whereClause. Walking the JSON saves a case for every node type.
+func anyWithoutWhere(node any) bool {
+	switch n := node.(type) {
+	case map[string]any:
+		for key, child := range n {
+			if stmt, ok := child.(map[string]any); ok && (key == "UpdateStmt" || key == "DeleteStmt") && stmt["whereClause"] == nil {
+				return true
+			}
+			if anyWithoutWhere(child) {
+				return true
+			}
+		}
+	case []any:
+		return slices.ContainsFunc(n, anyWithoutWhere)
+	}
+	return false
 }
 
 // chooseExport is an export's first step: it asks where to save, then tells the

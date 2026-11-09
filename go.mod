@@ -15,7 +15,9 @@ require (
 	github.com/go-ole/go-ole v1.3.0 // indirect
 	github.com/godbus/dbus/v5 v5.2.2 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
+	github.com/pganalyze/pg_query_go/v6 v6.2.5 // indirect
 	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/term v0.46.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
+	google.golang.org/protobuf v1.33.0 // indirect
 )

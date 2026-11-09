@@ -6,12 +6,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"regexp"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
+	pg_query "github.com/pganalyze/pg_query_go/v6"
 
 	"pg/internal/conn"
 )
@@ -26,12 +26,27 @@ const (
 	idleLimit = 5 * time.Minute
 )
 
-// copyToClient matches COPY to or from the client. Nothing here can feed one,
-// so the server would wait for ever, and nothing can show what one sends.
-var copyToClient = regexp.MustCompile(`(?is)(?:^|;)\s*copy\b[^;]*\b(?:from\s+stdin|to\s+stdout)\b`)
+// copiesToClient reports whether sql has a COPY to or from the client. Nothing
+// here can feed one, so the server would wait for ever, and nothing can show
+// what one sends. SQL that doesn't parse is left for the server to reject.
+func copiesToClient(sql string) bool {
+	tree, err := pg_query.Parse(sql)
+	if err != nil {
+		return false
+	}
+	for _, stmt := range tree.Stmts {
+		if c := stmt.Stmt.GetCopyStmt(); c != nil && c.Filename == "" && !c.IsProgram {
+			return true
+		}
+	}
+	return false
+}
 
 // ErrCopy is why a COPY to or from the client isn't run.
 var ErrCopy = errors.New("pg can't run COPY to or from the client: use a file on the server, or Export CSV")
+
+// ErrOneStatement is returned by an Explain given more than one statement.
+var ErrOneStatement = errors.New("explain takes one statement at a time: select just the one to explain")
 
 // ErrExpired ends a result whose next page wasn't asked for in time.
 var ErrExpired = errors.New("stopped after five minutes without scrolling, so it wouldn't keep holding locks: run it again for the rest")
@@ -134,7 +149,7 @@ func (s *Session) Run(sql string) Page {
 	if err != nil {
 		return Page{QueryID: q.id, Done: true, Err: err}
 	}
-	if copyToClient.MatchString(sql) {
+	if copiesToClient(sql) {
 		q.cancel()
 		return Page{QueryID: q.id, Done: true, Err: ErrCopy}
 	}
@@ -159,6 +174,10 @@ func (s *Session) Explain(sql string, analyze bool) Page {
 		return Page{QueryID: q.id, Done: true, Err: err}
 	}
 	defer q.cancel()
+	// Postgres would refuse these too, but less helpfully.
+	if stmts, err := pg_query.SplitWithScanner(sql, true); err == nil && len(stmts) > 1 {
+		return Page{QueryID: q.id, Done: true, Err: ErrOneStatement}
+	}
 
 	stmt := "explain (format json) " + sql
 	if analyze {

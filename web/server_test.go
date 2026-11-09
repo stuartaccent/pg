@@ -1210,3 +1210,81 @@ func TestSandboxesTable(t *testing.T) {
 		}
 	}
 }
+
+func TestWritesEveryRow(t *testing.T) {
+	risky := []string{
+		"delete from t",
+		"DELETE FROM t;",
+		"update t set a = 1",
+		"update only t set a = 1;",
+		"select 1; delete from t",
+		"-- a comment\ndelete from t",
+		"/* where */ delete from t",
+		"delete from t -- where id = 1",
+		"update t set a = 'where'",
+		`update t set "where" = 1`,
+		"update t set a = $$ where $$",
+		"update t set a = $x$ where $x$",
+		"update t set a = (select 1 from u where u.id = 1)",
+		"with x as (select 1) delete from t",
+		"with recursive x as (select 1 where true) update t set a = 1",
+		"with x as (delete from t returning *) select * from x",
+	}
+	safe := []string{
+		"",
+		"select 1",
+		"select * from t for update",
+		"select * from t for no key update",
+		"delete from t where id = 1",
+		"update t set a = 1 where id = 1",
+		"UPDATE t SET a = 1 WHERE id = 1",
+		"insert into t values (1) on conflict (id) do update set a = 1",
+		"grant update on t to someone",
+		"select 'delete from t'",
+		"-- delete from t\nselect 1",
+		"create function f() returns void language sql as $$ delete from t $$",
+		"delete from t where id = 1; update u set a = 1 where id = 2",
+		"delete from t where current of c",
+		"delete from", // doesn't parse, so the server says why
+	}
+	for _, sql := range risky {
+		if !writesEveryRow(sql) {
+			t.Errorf("%q: want true", sql)
+		}
+	}
+	for _, sql := range safe {
+		if writesEveryRow(sql) {
+			t.Errorf("%q: want false", sql)
+		}
+	}
+}
+
+func TestCheck(t *testing.T) {
+	s := New()
+	check := func(sql string) (got struct {
+		EveryRow    bool
+		Fingerprint string
+	}) {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodPost, "/check", strings.NewReader(url.Values{"sql": {sql}}.Encode()))
+		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		s.Handler().ServeHTTP(w, r)
+		if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	a, b := check("delete from t where id = 1"), check("DELETE FROM t  WHERE id=2")
+	if a.EveryRow || a.Fingerprint == "" || a.Fingerprint != b.Fingerprint {
+		t.Errorf("same query, different values: %+v, %+v", a, b)
+	}
+	if c := check("delete from u where id = 1"); c.Fingerprint == a.Fingerprint {
+		t.Error("a different table has the same fingerprint")
+	}
+	if got := check("delete from t"); !got.EveryRow {
+		t.Error("delete from t: want everyRow")
+	}
+	if got := check("select :id"); got.EveryRow || got.Fingerprint != "" {
+		t.Errorf("unparsable: %+v", got)
+	}
+}
