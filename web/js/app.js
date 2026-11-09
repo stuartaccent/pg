@@ -477,7 +477,27 @@ function showCell(td) {
 
 const cellValue = (td) => (td.hasAttribute("data-null") ? "" : td.textContent);
 
-const copyCell = (button, wholeRow) => copy(button, wholeRow ? [...openCell.parentElement.cells].map(cellValue).join("\t") : cellValue(openCell));
+// rowJSON is a row as an object keyed by column name, NULL as null. Columns
+// with no name (Activity's buttons) are left out; a repeated name gets " 2".
+function rowJSON(tr) {
+	const names = [...tr.closest("table").querySelectorAll("thead th")].map((th) => th.textContent.trim());
+	const row = {};
+	for (const [i, td] of [...tr.cells].entries()) {
+		let name = names[i];
+		if (!name) continue;
+		for (let n = 2; Object.hasOwn(row, name); n++) name = `${names[i]} ${n}`;
+		row[name] = td.hasAttribute("data-null") ? null : td.textContent;
+	}
+	return JSON.stringify(row, null, 2);
+}
+
+// Closes once copied, saying so in the status bar; stays open if it failed.
+async function copyCell(button, wholeRow) {
+	const text = wholeRow ? rowJSON(openCell.parentElement) : cellValue(openCell);
+	if (!(await copy(button, text))) return;
+	document.querySelector("#cell").close();
+	document.querySelector("#notice").textContent = wholeRow ? "Copied the row as JSON" : "Copied the value";
+}
 const copyPlan = (button) => copy(button, button.dataset.plan);
 const copyFrom = (button) => copy(button, button.dataset.copy);
 
@@ -497,6 +517,7 @@ async function copy(button, text) {
 	const label = button.textContent;
 	button.textContent = copied ? "Copied" : "Copy failed";
 	setTimeout(() => (button.textContent = label), 1000);
+	return copied;
 }
 
 // Tree buttons sit inside a <summary>: preventDefault stops them also toggling it.

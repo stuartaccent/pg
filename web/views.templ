@@ -241,7 +241,7 @@ templ Index(services []string, current string, readOnly bool, j jobView, err err
 					<pre id="cell-text" class="font-mono text-xs whitespace-pre-wrap break-all max-h-[60vh] overflow-auto"></pre>
 					<div class="modal-action">
 						<button type="button" class="btn btn-soft btn-sm" onclick="copyCell(this, false)">Copy value</button>
-						<button type="button" class="btn btn-soft btn-sm" onclick="copyCell(this, true)">Copy row</button>
+						<button type="button" class="btn btn-soft btn-sm" onclick="copyCell(this, true)" title="As JSON, keyed by column name">Copy row as JSON</button>
 						<form method="dialog"><button class="btn btn-sm">Close</button></form>
 					</div>
 				</div>
