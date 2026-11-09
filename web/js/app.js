@@ -106,26 +106,50 @@ function mount(panel) {
 	selectTab(panel.dataset.tab);
 }
 
+// The server tools, which open as tabs of their own beside the query tabs.
+const tools = ["activity", "health", "backups"];
+
+// Selects a query tab or a tool. activeTab stays a query tab, as the
+// editor's commands act on it.
 function selectTab(id) {
-	activeTab = id;
-	for (const panel of document.querySelectorAll("[data-tab]")) panel.hidden = panel.dataset.tab !== id;
+	const tool = tools.includes(id);
+	if (!tool) activeTab = id;
+	for (const panel of document.querySelectorAll("[data-tool-panel]")) panel.hidden = panel.id !== `${id}-panel`;
+	for (const panel of document.querySelectorAll("[data-tab]")) panel.hidden = tool || panel.dataset.tab !== id;
 	for (const tab of document.querySelectorAll("[data-tab-button]")) {
 		const active = tab.dataset.tabButton === id;
 		tab.classList.toggle("tab-active", active);
 		tab.querySelector("[role=tab]")?.setAttribute("aria-selected", active);
 	}
-	views.get(id).focus();
+	if (!tool) views.get(id).focus();
+}
+
+// The tool showing, if any, and whether a tool's tab is open at all.
+const toolShowing = () => tools.find((tool) => !document.querySelector(`#${tool}-panel`).hidden);
+const toolOpen = (tool) => !document.querySelector(`#${tool}-tab`).hidden;
+
+function openTool(tool) {
+	document.querySelector(`#${tool}-tab`).hidden = false;
+	selectTab(tool);
 }
 
 async function closeTab(id) {
+	if (tools.includes(id)) {
+		document.querySelector(`#${id}-tab`).hidden = true;
+		if (toolShowing() === id) selectTab(activeTab);
+		return;
+	}
 	if (views.size === 1) return;
 	if (views.get(id).state.doc.length > 0 && !(await ask("Close this tab and discard its SQL?", true))) return;
 	await removeTab(id);
-	if (activeTab === id) selectTab([...views.keys()].at(-1));
+	if (activeTab === id) {
+		activeTab = [...views.keys()].at(-1);
+		if (!toolShowing()) selectTab(activeTab);
+	}
 	saveTabs();
 }
 
-const closeActiveTab = () => closeTab(activeTab);
+const closeActiveTab = () => closeTab(toolShowing() ?? activeTab);
 
 // Runs a menu command, unless a dialog is open and it would act behind that.
 function fromMenu(action) {
@@ -244,9 +268,8 @@ function mountNewPanels() {
 // browsing the tree never loses SQL.
 async function openSQL(text) {
 	if (views.get(activeTab).state.doc.length > 0) await newTab();
-	const view = views.get(activeTab);
-	setText(view, text);
-	view.focus();
+	setText(views.get(activeTab), text);
+	selectTab(activeTab); // from behind a tool, if one is showing
 }
 
 // sqlToRun is what a tab's buttons act on: the selection if there is one.
@@ -278,8 +301,8 @@ function showUnfocused(dialog) {
 }
 
 async function showBackups() {
+	openTool("backups");
 	await htmx.ajax("GET", "/backups", { target: "#backups-body" });
-	showUnfocused(document.querySelector("#backups"));
 }
 
 // Shows a view in the sidebar: "tree", or "queries", which reloads its list
@@ -303,6 +326,7 @@ async function useQuery(event, el) {
 
 // Saves with the app's Save dialog, or the page's own in a browser.
 async function saveQuery() {
+	selectTab(activeTab); // ⌘S over a tool saves the query tab, so show it
 	const tab = activeTab;
 	const name = tabQueries.get(tab) ?? "";
 	const text = views.get(tab).state.doc.toString();
@@ -351,23 +375,24 @@ document.addEventListener("query-saved", () => {
 	document.querySelector("#notice").textContent = `Saved ${name}`;
 });
 
+// Each tool opens its tab, or goes to it, and refreshes it now.
 async function showActivity() {
+	openTool("activity");
 	await htmx.ajax("GET", "/activity", { target: "#activity-body" });
-	showUnfocused(document.querySelector("#activity"));
 }
 
 // Opens at once with a spinner, as the checks can take a moment on a big database.
 async function showHealth() {
 	const body = document.querySelector("#health-body");
 	body.innerHTML = '<span class="loading loading-spinner loading-sm"></span>';
-	showUnfocused(document.querySelector("#health"));
+	openTool("health");
 	await htmx.ajax("GET", "/health", { target: body });
 }
 
-// Whether the list can refresh. Not under another dialog: replacing the row
-// behind a confirm would lose its Terminate. Nor while text is being selected.
-const activityLive = () =>
-	document.querySelector("#activity").open && document.querySelectorAll("dialog[open]").length === 1 && getSelection().isCollapsed;
+// Whether the list can refresh: only while showing. Not under a dialog:
+// replacing the row behind a confirm would lose its Terminate. Nor while
+// text is being selected.
+const activityLive = () => toolShowing() === "activity" && !document.querySelector("dialog[open]") && getSelection().isCollapsed;
 
 function showRestore(button) {
 	const { file, name, service } = button.dataset;
@@ -394,15 +419,8 @@ function checkReplace() {
 	document.querySelector("#replace-submit").disabled = typed !== document.querySelector("#replace-database").textContent;
 }
 
-function closeReplace() {
-	document.querySelector("#replace").close();
-	document.querySelector("#backups").close();
-}
-
-function closeRestore() {
-	document.querySelector("#restore").close();
-	document.querySelector("#backups").close();
-}
+const closeReplace = () => document.querySelector("#replace").close();
+const closeRestore = () => document.querySelector("#restore").close();
 
 async function showHistory() {
 	const body = document.querySelector("#history-body");
@@ -544,7 +562,7 @@ document.addEventListener("keydown", (event) => {
 	resize(bar, sizeOf(bar) + step);
 });
 
-Object.assign(window, { showSidebar, fromMenu, newTab, closeActiveTab, selectTab, closeTab, closeAllTabs, useSQL, useDefinition, resetTree, formatSQL, showHistory, chooseHistory, sortHistory, showQueries, useQuery, openQueryFile, saveQuery, showActivity, showHealth, activityLive, showBackups, showRestore, closeRestore, showReplace, checkReplace, closeReplace, copyCell, copyPlan, copyFrom });
+Object.assign(window, { toolOpen, showSidebar, fromMenu, newTab, closeActiveTab, selectTab, closeTab, closeAllTabs, useSQL, useDefinition, resetTree, formatSQL, showHistory, chooseHistory, sortHistory, showQueries, useQuery, openQueryFile, saveQuery, showActivity, showHealth, activityLive, showBackups, showRestore, closeRestore, showReplace, checkReplace, closeReplace, copyCell, copyPlan, copyFrom });
 
 // Wails holds back the menu's commands until its runtime says the page is ready.
 // This page doesn't load that runtime, so it says so itself.

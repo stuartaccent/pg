@@ -113,11 +113,34 @@ templ Index(services []string, current string, readOnly bool, j jobView, err err
 						<div id="tabs" role="tablist" aria-label="Query tabs" class="flex min-w-0 overflow-x-auto overflow-y-hidden [scrollbar-width:none]">
 							@tabButton("1")
 						</div>
+						<!-- Server tools are tabs while open, but not query tabs: app.js keeps them apart. -->
+						<div role="tablist" aria-label="Server tools" class="flex">
+							@toolTab("activity", "Activity", "activity")
+							@toolTab("health", "Health", "heart-pulse")
+							@toolTab("backups", "Backups", "archive")
+						</div>
 						<button type="button" class="btn btn-square btn-ghost btn-xs mx-1 self-center" aria-label="New query tab" title="New tab (⌘T)" hx-post="/tabs" hx-target="#panels" hx-swap="beforeend"><i data-lucide="plus" class="size-3.5"></i></button>
 						<button type="button" class="btn btn-square btn-ghost btn-xs ml-auto mr-1 self-center" aria-label="Close all tabs" title="Close all tabs" onclick="closeAllTabs()"><i data-lucide="copy-x" class="size-3.5"></i></button>
 					</div>
 					<div id="panels" class="flex flex-1 min-h-0">
 						@tabPanel("1")
+						<section id="activity-panel" data-tool-panel class="flex flex-1 min-w-0 min-h-0 flex-col" hidden>
+							<div class="flex h-10 shrink-0 items-center gap-3 border-b border-base-content/10 px-3 text-xs">
+								<span class="font-medium text-base-content/70">Connections to this server</span>
+								<span class="text-base-content/50">Refreshes every 2 seconds, except while you select text</span>
+							</div>
+							<!-- The scrolling is out here so that refreshing keeps its place. -->
+							<div class="results flex-1 min-h-0 overflow-auto bg-base-100 select-text">
+								<div id="activity-body" hx-get="/activity" hx-trigger="every 2s [activityLive()]"></div>
+							</div>
+						</section>
+						<section id="health-panel" data-tool-panel class="flex-1 min-w-0 min-h-0 overflow-auto bg-base-100 p-3 select-text" hidden>
+							<div id="health-body"></div>
+						</section>
+						<section id="backups-panel" data-tool-panel class="flex-1 min-w-0 min-h-0 overflow-auto bg-base-100 p-4 select-text" hidden>
+							<!-- A finished job may have made a backup or a sandbox. -->
+							<div id="backups-body" class="max-w-5xl" hx-get="/backups" hx-trigger="services-changed[toolOpen('backups')] from:body"></div>
+						</section>
 					</div>
 				</div>
 			</div>
@@ -157,10 +180,6 @@ templ Index(services []string, current string, readOnly bool, j jobView, err err
 					</div>
 				</form>
 			</dialog>
-			<dialog id="backups" class="modal">
-				<div id="backups-body" class="modal-box max-w-4xl"></div>
-				<form method="dialog" class="modal-backdrop"><button aria-label="Close">close</button></form>
-			</dialog>
 			<dialog id="save-query" class="modal">
 				<form class="modal-box" hx-post="/queries" hx-target="#save-status">
 					<h3 class="text-base font-medium">Save query</h3>
@@ -173,23 +192,6 @@ templ Index(services []string, current string, readOnly bool, j jobView, err err
 						<button type="submit" class="btn btn-primary btn-sm">Save</button>
 					</div>
 				</form>
-			</dialog>
-			<dialog id="activity" class="modal">
-				<div class="modal-box max-w-6xl">
-					<h3 class="font-medium">Activity</h3>
-					<!-- The scrolling is out here so that refreshing keeps its place. -->
-					<div class="results mt-2 max-h-[60vh] overflow-auto">
-						<div id="activity-body" hx-get="/activity" hx-trigger="every 2s [activityLive()]"></div>
-					</div>
-				</div>
-				<form method="dialog" class="modal-backdrop"><button aria-label="Close">close</button></form>
-			</dialog>
-			<dialog id="health" class="modal">
-				<div class="modal-box w-[90vw] max-w-[90vw]">
-					<h3 class="font-medium">Health</h3>
-					<div id="health-body" class="mt-2"></div>
-				</div>
-				<form method="dialog" class="modal-backdrop"><button aria-label="Close">close</button></form>
 			</dialog>
 			<dialog id="restore" class="modal">
 				<form class="modal-box" hx-post="/backups/restore" hx-target="#job" onsubmit="closeRestore()">
@@ -275,13 +277,25 @@ templ railButton(label, icon, view, action string) {
 // The close button keeps its place and only fades in, so hovering never
 // changes a tab's width and moves the ones after it.
 templ tabButton(id string) {
+	@tabButtonOf(id, "Query "+id, "file-code")
+}
+
+// toolTab is a server tool's tab, hidden until the tool is opened.
+templ toolTab(id, label, icon string) {
+	<span id={ id + "-tab" } class="contents" hidden>
+		@tabButtonOf(id, label, icon)
+	</span>
+}
+
+// tabButtonOf is a tab with any label and icon, for Activity as well as queries.
+templ tabButtonOf(id, label, icon string) {
 	<span class="group relative flex h-full shrink-0 items-center gap-1.5 border-r border-base-content/10 pl-3 pr-1 text-base-content/60 [&.tab-active]:bg-base-100 [&.tab-active]:text-base-content [&:not(.tab-active)]:hover:bg-base-300/50" data-tab-button={ id }>
 		<span aria-hidden="true" class="invisible absolute inset-x-0 top-0 h-0.5 bg-primary group-[.tab-active]:visible"></span>
 		<button type="button" role="tab" aria-selected={ fmt.Sprint(id == "1") } class="flex cursor-pointer items-center gap-1.5 whitespace-nowrap focus-visible:underline focus-visible:outline-none" onclick="selectTab(this.parentElement.dataset.tabButton)">
-			<i data-lucide="file-code" class="size-3.5 opacity-60"></i>
-			Query { id }
+			<i data-lucide={ icon } class="size-3.5 opacity-60"></i>
+			{ label }
 		</button>
-		<button type="button" class="tab-close btn btn-ghost btn-xs btn-square size-5 min-h-0 p-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100" aria-label={ "Close Query " + id } onclick="closeTab(this.parentElement.dataset.tabButton)"><i data-lucide="x" class="size-3"></i></button>
+		<button type="button" class="tab-close btn btn-ghost btn-xs btn-square size-5 min-h-0 p-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100" aria-label={ "Close " + label } onclick="closeTab(this.parentElement.dataset.tabButton)"><i data-lucide="x" class="size-3"></i></button>
 	</span>
 }
 
@@ -400,18 +414,18 @@ templ JobStatus(j jobView) {
 	}
 }
 
-// BackupsBody is the Backups dialog's content.
+// BackupsBody is the Backups tab's content.
 templ BackupsBody(service, database string, canRestore bool, dir string, files []backupFile, sandboxes []dockerpg.Sandbox, err error) {
 	<div class="flex items-center justify-between gap-2">
 		<h3 class="font-medium">Backups</h3>
 		if service != "" {
 			<div class="join">
-				<button type="button" class="btn btn-primary btn-sm join-item" hx-post="/backup" hx-target="#job" onclick="document.querySelector('#backups').close()">Back up { service }</button>
-				<button type="button" class="btn btn-primary btn-sm join-item px-2" popovertarget="backup-kinds" style="anchor-name:--backup-kinds" aria-label="Other kinds of backup">▾</button>
+				<button type="button" class="btn btn-primary btn-sm join-item" hx-post="/backup" hx-target="#job">Back up { service }</button>
+				<button type="button" class="btn btn-primary btn-sm join-item px-2" popovertarget="backup-kinds" style="anchor-name:--backup-kinds" aria-label="Other kinds of backup"><i data-lucide="chevron-down" class="size-3.5"></i></button>
 			</div>
 			<ul popover id="backup-kinds" style="position-anchor:--backup-kinds" class="dropdown dropdown-end menu w-64 rounded-box bg-base-200 shadow-md">
 				<li>
-					<button type="button" hx-post="/backup" hx-vals='{"schema":"1"}' hx-target="#job" onclick="this.closest('[popover]').hidePopover(); document.querySelector('#backups').close()">
+					<button type="button" hx-post="/backup" hx-vals='{"schema":"1"}' hx-target="#job" onclick="this.closest('[popover]').hidePopover()">
 						<span>
 							Schema only
 							<span class="block text-xs text-base-content/60">No rows: quick, and enough to compare schemas</span>
@@ -430,8 +444,7 @@ templ BackupsBody(service, database string, canRestore bool, dir string, files [
 	if len(files) == 0 {
 		<p class="text-base-content/50 text-sm mt-2">No backups yet.</p>
 	} else {
-		<!-- Menus are popovers, so this scrolling doesn't cut them off. -->
-		<div class="mt-2 max-h-[40vh] overflow-auto">
+		<div class="mt-2">
 			<table class="table table-sm [&_tr>:first-child]:pl-0 [&_tr>:last-child]:pr-0">
 				<thead>
 					<tr>
@@ -457,7 +470,7 @@ templ BackupsBody(service, database string, canRestore bool, dir string, files [
 							<td class="text-xs whitespace-nowrap">{ f.Taken() }</td>
 							<td class="text-xs text-right whitespace-nowrap text-base-content/60">{ f.Size }</td>
 							<td class="text-right whitespace-nowrap">
-								<button type="button" class="btn btn-soft btn-xs" hx-post="/sandboxes" hx-vals={ fileValues(f.Name) } hx-target="#job" onclick="document.querySelector('#backups').close()">Sandbox</button>
+								<button type="button" class="btn btn-soft btn-xs" hx-post="/sandboxes" hx-vals={ fileValues(f.Name) } hx-target="#job">Sandbox</button>
 								@backupMenu(fmt.Sprintf("backup-menu-%d", i), f, service, database, canRestore)
 							</td>
 						</tr>
@@ -538,7 +551,7 @@ templ connectField(name, value string) {
 templ backupMenu(id string, f backupFile, service, database string, canRestore bool) {
 	<button type="button" class="btn btn-ghost btn-xs" popovertarget={ id } style={ templ.SafeCSS("anchor-name:--" + id) } aria-label={ "More for " + f.Name }>⋯</button>
 	<ul popover id={ id } style={ templ.SafeCSS("position-anchor:--" + id) } class="dropdown dropdown-end menu w-36 rounded-box bg-base-200 shadow-md text-left">
-		<li><button type="button" hx-post="/backups/verify" hx-vals={ fileValues(f.Name) } hx-target="#job" onclick="this.closest('[popover]').hidePopover(); document.querySelector('#backups').close()">Verify</button></li>
+		<li><button type="button" hx-post="/backups/verify" hx-vals={ fileValues(f.Name) } hx-target="#job" onclick="this.closest('[popover]').hidePopover()">Verify</button></li>
 		if canRestore {
 			<li><button type="button" data-file={ f.Name } data-name={ dockerpg.RestoreName(f.Name, time.Now()) } data-service={ service } onclick="this.closest('[popover]').hidePopover(); showRestore(this)">Restore</button></li>
 			if database != "" && !f.Schema {
@@ -583,10 +596,10 @@ templ SaveStatus(err error) {
 	}
 }
 
-// ActivityBody is the Activity dialog's content.
+// ActivityBody is the Activity tab's content.
 templ ActivityBody(backends []catalog.Backend, canStop bool, err error) {
 	if err != nil {
-		<p class="text-error whitespace-pre-wrap mb-2">{ err.Error() }</p>
+		<p class="text-error whitespace-pre-wrap px-3 py-2">{ err.Error() }</p>
 	}
 	if len(backends) > 0 {
 		<table class="table table-sm table-pin-rows font-mono text-xs">
@@ -629,11 +642,11 @@ templ ActivityBody(backends []catalog.Backend, canStop bool, err error) {
 			</tbody>
 		</table>
 	} else if err == nil {
-		<p class="text-base-content/50">Nothing else is connected.</p>
+		<p class="text-base-content/50 px-3 py-2">Nothing else is connected.</p>
 	}
 }
 
-// HealthBody is the Health dialog's content.
+// HealthBody is the Health tab's content.
 templ HealthBody(report catalog.Report, err error) {
 	if err != nil {
 		<p class="text-error whitespace-pre-wrap">{ err.Error() }</p>
@@ -662,7 +675,7 @@ templ HealthBody(report catalog.Report, err error) {
 				</label>
 				<!-- Only the table scrolls, with no padding above it for rows to show
 				     through over its pinned header. -->
-				<div class="tab-content h-[60vh] bg-base-100 border-base-300 p-3">
+				<div class="tab-content h-[max(20rem,calc(100vh-12.5rem))] bg-base-100 border-base-300 p-3">
 					<div class="flex flex-col h-full">
 						<div class="flex items-start gap-2 mb-2 shrink-0">
 							<p class="text-sm text-base-content/60">
@@ -671,7 +684,7 @@ templ HealthBody(report catalog.Report, err error) {
 								}
 								{ check.Reason }
 							</p>
-							<button type="button" class="btn btn-ghost btn-xs ml-auto shrink-0" data-sql={ check.SQL } onclick="document.querySelector('#health').close(); useSQL(event, this)">Open as query</button>
+							<button type="button" class="btn btn-ghost btn-xs ml-auto shrink-0" data-sql={ check.SQL } onclick="useSQL(event, this)">Open as query</button>
 						</div>
 						if check.Err != nil {
 							<p class="text-error text-sm whitespace-pre-wrap">{ check.Err.Error() }</p>
