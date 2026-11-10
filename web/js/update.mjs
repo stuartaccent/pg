@@ -10,13 +10,17 @@ const literal = (cell) => (cell.null ? "null" : `'${cell.text.replaceAll("'", "'
 export function updateSQL(table, headers, row, column, wholeRow) {
 	const oid = headers[column].table;
 	const at = new Map(); // attnum to result column
+	const same = (a, b) => a.null === b.null && a.text === b.text;
 	for (const [i, h] of headers.entries()) {
 		if (h.table !== oid) continue;
-		// Joined to itself, a key could come from one copy and the value another.
-		if (at.has(h.attr)) return { error: `${table.name} appears more than once in the results` };
-		at.set(h.attr, i);
+		// A column repeated with the same value, as in select id, *, is
+		// harmless. Different values mean the table is joined to itself, and
+		// the key could come from one copy and the value from another.
+		if (at.has(h.attr) && !same(row[at.get(h.attr)], row[i])) return { error: `${table.name} appears more than once in the results` };
+		if (!at.has(h.attr)) at.set(h.attr, i);
 	}
 	const clicked = headers[column].attr;
+	if (table.temporary) return { error: `${table.name} is a temporary table, so only the tab that made it can change it` };
 	if (table.inherited) return { error: `Other tables inherit from ${table.name}, and an update would change their rows too` };
 	const key = table.key.map(String);
 	const generated = table.generated.map(String);

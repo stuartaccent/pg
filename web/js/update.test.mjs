@@ -50,6 +50,16 @@ test("refuses a table that appears twice, so the key matches what was clicked", 
 	assert.match(updateSQL(table, twice, values, 2, false).error, /more than once/);
 });
 
+test("allows a column repeated with the same value, as in select id, *", () => {
+	const repeated = [{ table: "10", attr: "1" }, ...headers];
+	const values = [row[0], ...row];
+	assert.equal(updateSQL(table, repeated, values, 3, false).sql, `update public.t\nset "Name" = 'it''s'\nwhere id = '7'\n  and k2 = 'b';\n`);
+});
+
+test("refuses a temporary table, which other tabs' sessions can't see", () => {
+	assert.match(updateSQL({ ...table, temporary: true }, headers, row, 2, false).error, /temporary table/);
+});
+
 test("leaves generated columns out of a row, and refuses one as a cell", () => {
 	const made = { ...table, generated: [4] };
 	assert.equal(updateSQL(made, headers, row, 2, true).sql, `update public.t\nset "Name" = 'it''s'\nwhere id = '7'\n  and k2 = 'b';\n`);

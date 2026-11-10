@@ -401,7 +401,7 @@ func TestTable(t *testing.T) {
 		t.Fatal(err)
 	}
 	// An index's included columns aren't part of the key.
-	if got, err := c.Table(ctx, string(made[0][0])); err != nil || string(got.Key) != "[1]" || string(got.Generated) != "[3, 4]" || got.Inherited {
+	if got, err := c.Table(ctx, string(made[0][0])); err != nil || string(got.Key) != "[1]" || string(got.Generated) != "[3, 4]" || got.Inherited || !got.Temporary {
 		t.Errorf("made = key %s, generated %s, inherited %v, %v", got.Key, got.Generated, got.Inherited, err)
 	}
 	if _, err := c.Table(ctx, "0"); err == nil {
