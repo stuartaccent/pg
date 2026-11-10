@@ -37,7 +37,7 @@ func RestoreName(backupName string, at time.Time) string {
 	if loc := versionInName.FindStringIndex(stem); loc != nil {
 		stem = stem[:loc[0]]
 	}
-	stem = regexp.MustCompile(`[^A-Za-z0-9_]+`).ReplaceAllString(stem, "_")
+	stem = unsafeInDatabase.ReplaceAllString(stem, "_")
 	if stem == "" || stem[0] >= '0' && stem[0] <= '9' {
 		stem = "db_" + stem
 	}
@@ -117,13 +117,10 @@ func Restore(ctx context.Context, t Target, backup, database string, progress fu
 func dropCreated(admin *pgconn.PgConn, database string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	res := admin.ExecParams(ctx, "select pg_terminate_backend(pid) from pg_stat_activity where datname = $1",
-		[][]byte{[]byte(database)}, nil, nil, nil).Read()
-	if res.Err != nil {
-		return res.Err
+	if _, err := rows(ctx, admin, "select pg_terminate_backend(pid) from pg_stat_activity where datname = $1", database); err != nil {
+		return err
 	}
-	_, err := admin.Exec(ctx, "drop database "+quoteName(database)).ReadAll()
-	return err
+	return execute(ctx, admin, "drop database "+quoteName(database))
 }
 
 // fill loads the backup into database and reads back what arrived. keepOwners

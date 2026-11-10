@@ -51,7 +51,9 @@ func BackupName(database, image string, at time.Time) string {
 	return fmt.Sprintf("%s-pg%s-%s.backup", unsafeInName.ReplaceAllString(database, "_"), version, at.Format("20060102-150405"))
 }
 
-var versionInName = regexp.MustCompile(`-pg(\d+)-`)
+// versionInName finds the version BackupName records, by the time after it, so
+// a database called legacy-pg9-app doesn't count.
+var versionInName = regexp.MustCompile(`-pg(\d+)-\d{8}-\d{6}`)
 
 // ImageForBackup returns the image to restore a backup with. Postgres can
 // restore older dumps, so a file from elsewhere gets the latest.
@@ -125,14 +127,19 @@ func run(cmd *exec.Cmd, progress func(string)) ([]string, error) {
 			last = last[1:]
 		}
 	}
+	// A line too long to scan stops the loop. The rest still has to be read,
+	// or the command blocks writing it and never exits.
+	_, _ = io.Copy(io.Discard, pipe)
 	return last, cmd.Wait()
 }
 
 // containerHost is host as seen from inside a container, where localhost is
 // the container itself.
 func containerHost(host string) string {
-	switch host {
-	case "localhost", "127.0.0.1", "::1":
+	switch {
+	case host == "localhost", host == "127.0.0.1", host == "::1":
+		return "host.docker.internal"
+	case strings.HasPrefix(host, "/"): // a socket, for a service with no host
 		return "host.docker.internal"
 	}
 	return host
@@ -215,12 +222,19 @@ type Sandbox struct {
 	Password string
 }
 
+// removeLater removes a sandbox with a context of its own, so it works even
+// once the job's has ended.
+func removeLater(name string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	_ = Remove(ctx, name)
+}
+
 // IsSandbox reports whether a service name is a sandbox's.
 func IsSandbox(name string) bool {
 	return strings.HasPrefix(name, sandboxPrefix)
 }
 
-// DSN returns how to connect to it.
 // URL is how other programs can connect to it, from this machine only.
 func (s Sandbox) URL() string {
 	u := url.URL{Scheme: "postgresql", User: url.UserPassword("postgres", s.Password), Host: fmt.Sprintf("127.0.0.1:%d", s.Port), Path: "/" + sandboxDB}
@@ -230,6 +244,7 @@ func (s Sandbox) URL() string {
 // Database is the name of the database a sandbox holds the backup in.
 func (Sandbox) Database() string { return sandboxDB }
 
+// DSN returns how to connect to it.
 func (s Sandbox) DSN() string {
 	return fmt.Sprintf("host=127.0.0.1 port=%d user=postgres password=%s dbname=%s sslmode=disable", s.Port, s.Password, sandboxDB)
 }
@@ -337,17 +352,10 @@ func NewSandbox(ctx context.Context, image, backup string, progress func(string)
 		return Sandbox{}, Skipped{}, fmt.Errorf("starting the sandbox: %w: %s", err, strings.Join(last, " "))
 	}
 
-	// A sandbox that didn't finish isn't one anyone should be left with. It's
-	// removed even if ctx is what ended it.
-	discard := func() {
-		cleanup, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		_ = Remove(cleanup, sb.Name)
-	}
-
+	// A sandbox that didn't finish isn't one anyone should be left with.
 	progress("Waiting for Postgres to start")
 	if err := waitUntilReady(ctx, sb.Name); err != nil {
-		discard()
+		removeLater(sb.Name)
 		return Sandbox{}, Skipped{}, err
 	}
 	out, err := output(ctx, nil, "port", sb.Name, "5432/tcp")
@@ -355,7 +363,7 @@ func NewSandbox(ctx context.Context, image, backup string, progress func(string)
 		sb.Port, err = portOf(out)
 	}
 	if err != nil {
-		discard()
+		removeLater(sb.Name)
 		return Sandbox{}, Skipped{}, err
 	}
 
@@ -365,7 +373,7 @@ func NewSandbox(ctx context.Context, image, backup string, progress func(string)
 	restore.Stdin = f
 	skipped, err := runRestore(ctx, restore, progress)
 	if err != nil {
-		discard()
+		removeLater(sb.Name)
 		return Sandbox{}, Skipped{}, err
 	}
 	return sb, skipped, nil

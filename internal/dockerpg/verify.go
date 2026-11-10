@@ -10,7 +10,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
 
@@ -77,11 +76,7 @@ func Verify(ctx context.Context, image, backup string, progress func(string)) (R
 	if err != nil {
 		return Report{}, err
 	}
-	defer func() {
-		cleanup, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		_ = Remove(cleanup, sb.Name)
-	}()
+	defer removeLater(sb.Name)
 	list := command(ctx, nil, "exec", "--interactive", sb.Name, "pg_restore", "--list")
 	return readBack(ctx, list, backup, sb.DSN(), skipped, progress)
 }

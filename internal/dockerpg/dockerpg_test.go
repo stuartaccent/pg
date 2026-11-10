@@ -3,6 +3,7 @@ package dockerpg
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -34,6 +35,9 @@ func TestBackupNamesRoundTrip(t *testing.T) {
 	if got := ImageForBackup(name); got != "postgres:17" {
 		t.Errorf("image = %q", got)
 	}
+	if got := ImageForBackup(BackupName("legacy-pg9-app", "postgres:17", at)); got != "postgres:17" {
+		t.Errorf("image when the name has a version too = %q", got)
+	}
 	if got := ImageForBackup("other_app.backup"); got != "postgres:latest" {
 		t.Errorf("image for someone else's file = %q", got)
 	}
@@ -45,6 +49,7 @@ func TestContainerHost(t *testing.T) {
 		"127.0.0.1":      "host.docker.internal",
 		"::1":            "host.docker.internal",
 		"db.example.com": "db.example.com",
+		"/tmp":           "host.docker.internal",
 	} {
 		if got := containerHost(host); got != want {
 			t.Errorf("%s: got %q", host, got)
@@ -415,6 +420,7 @@ func TestRestoreName(t *testing.T) {
 	for backup, want := range map[string]string{
 		"crm_db_training-pg17-20261105-100000.backup": "crm_db_training_restored_20261106",
 		"shop-db-next-pg17-20261105-100000.backup":    "shop_db_next_restored_20261106",
+		"legacy-pg9-app-pg17-20261105-100000.backup":  "legacy_pg9_app_restored_20261106",
 		"other_app.backup":                            "other_app_restored_20261106",
 		"2026 dump.backup":                            "db_2026_dump_restored_20261106",
 	} {
@@ -841,5 +847,18 @@ func TestPsqlCommand(t *testing.T) {
 	want := "PGHOST=host.docker.internal\nPGPORT=5418\nPGUSER=postgres\nPGPASSWORD=it's\nPGDATABASE=app\n"
 	if string(b) != want {
 		t.Errorf("env file = %q", b)
+	}
+}
+
+func TestRunSurvivesALongLine(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	// 2 MB on one line, more than the scanner takes, and than a pipe holds.
+	cmd := exec.CommandContext(ctx, "sh", "-c", "head -c 2000000 /dev/zero | tr '\\0' x >&2; echo >&2; echo done >&2")
+	if _, err := run(cmd, func(string) {}); err != nil {
+		t.Fatal(err)
+	}
+	if ctx.Err() != nil {
+		t.Fatal("run hung until the timeout")
 	}
 }
