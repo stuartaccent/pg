@@ -135,7 +135,8 @@ templ Index(services []string, current string, readOnly bool, j jobView, err err
 							</div>
 						</section>
 						<section id="health-panel" data-tool-panel class="flex-1 min-w-0 min-h-0 overflow-auto bg-base-100 p-3 select-text" hidden>
-							<div id="health-body"></div>
+							<!-- Connecting elsewhere would leave the last server's checks here. -->
+							<div id="health-body" hx-get="/health" hx-trigger="connected[toolOpen('health')] from:body"></div>
 						</section>
 						<section id="backups-panel" data-tool-panel class="flex-1 min-w-0 min-h-0 overflow-auto bg-base-100 p-4 select-text" hidden>
 							<!-- A finished job may have made a backup or a sandbox. -->

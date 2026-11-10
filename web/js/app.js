@@ -287,6 +287,7 @@ function mountNewPanels() {
 async function openSQL(text) {
 	if (views.get(activeTab).state.doc.length > 0) await newTab();
 	setText(views.get(activeTab), text);
+	tabQueries.delete(activeTab); // an emptied tab could still name its saved query; callers opening one set it again
 	selectTab(activeTab); // from behind a tool, if one is showing
 }
 
@@ -318,10 +319,19 @@ function showUnfocused(dialog) {
 	document.activeElement.blur();
 }
 
-async function showBackups() {
-	openTool("backups");
-	await htmx.ajax("GET", "/backups", { source: "#backups-body", target: "#backups-body" });
+// Each tool opens its tab, or goes to it, and refreshes it now. Given a class
+// for it, a spinner shows meanwhile, for the ones that can take a moment.
+async function showTool(tool, spinner) {
+	const body = document.querySelector(`#${tool}-body`);
+	if (spinner !== undefined) body.innerHTML = `<span class="loading loading-spinner loading-sm ${spinner}"></span>`;
+	openTool(tool);
+	await htmx.ajax("GET", `/${tool}`, { source: body, target: body });
 }
+const showBackups = () => showTool("backups");
+const showActivity = () => showTool("activity");
+// The checks can take a moment on a big database.
+const showHealth = () => showTool("health", "");
+const showHistory = () => showTool("history", "m-3").then(() => document.querySelector("#history-search")?.focus());
 
 // Shows a view in the sidebar: "tree", or "queries", which reloads its list
 // each time, as files can change in Finder meanwhile.
@@ -393,20 +403,6 @@ document.addEventListener("query-saved", () => {
 	document.querySelector("#notice").textContent = `Saved ${name}`;
 });
 
-// Each tool opens its tab, or goes to it, and refreshes it now.
-async function showActivity() {
-	openTool("activity");
-	await htmx.ajax("GET", "/activity", { source: "#activity-body", target: "#activity-body" });
-}
-
-// Opens at once with a spinner, as the checks can take a moment on a big database.
-async function showHealth() {
-	const body = document.querySelector("#health-body");
-	body.innerHTML = '<span class="loading loading-spinner loading-sm"></span>';
-	openTool("health");
-	await htmx.ajax("GET", "/health", { source: body, target: body });
-}
-
 // Whether the list can refresh: only while showing. Not under a dialog:
 // replacing the row behind a confirm would lose its Terminate. Nor while
 // text is being selected.
@@ -439,14 +435,6 @@ function checkReplace() {
 
 const closeReplace = () => document.querySelector("#replace").close();
 const closeRestore = () => document.querySelector("#restore").close();
-
-async function showHistory() {
-	const body = document.querySelector("#history-body");
-	body.innerHTML = '<span class="loading loading-spinner loading-sm m-3"></span>';
-	openTool("history");
-	await htmx.ajax("GET", "/history", { source: body, target: body });
-	document.querySelector("#history-search")?.focus();
-}
 
 // chooseHistory marks the History entry whose detail is showing. The form
 // keeps its id, so the list still marks it after reloading.
@@ -710,6 +698,11 @@ document.addEventListener("htmx:confirm", (event) => {
 	const isQuery = elt.matches("form[hx-post='/query']");
 	if (!isQuery && !elt.matches("[hx-post='/export/choose']")) return;
 	const sql = sqlToRun(elt);
+	if (!isQuery && !sql.trim()) {
+		event.preventDefault();
+		document.querySelector("#notice").textContent = "Nothing to export";
+		return;
+	}
 	const names = paramNames(sql);
 	if (!isQuery && names.length === 0) return;
 	event.preventDefault();
@@ -738,8 +731,9 @@ document.addEventListener("DOMContentLoaded", () => {
 	loadSchema();
 	reconnect();
 });
-document.addEventListener("connected", () => {
-	localStorage.setItem("service", document.querySelector("select[name=service]").value);
+document.addEventListener("connected", (event) => {
+	// A job's Replace says connected too, with no name, as it's the same one.
+	if (event.detail?.value) localStorage.setItem("service", event.detail.value);
 	resetTree();
 });
 

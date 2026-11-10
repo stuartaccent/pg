@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -74,9 +75,10 @@ func (s *Server) more(w http.ResponseWriter, r *http.Request) {
 	}
 	p, err := sess.More(id)
 	if err != nil {
-		// A newer query replaced this one; its sentinel row just goes away.
-		w.WriteHeader(http.StatusOK)
-		return
+		// Gone, as connecting elsewhere closed it, so the results end here and
+		// say so, rather than looking complete. (A newer query in the tab
+		// replaces them anyway.)
+		p = session.Page{Done: true, Err: fmt.Errorf("%w: run it again for the rest", err)}
 	}
 	if r.FormValue("next") != "" {
 		render(w, r, Results(p, tab))

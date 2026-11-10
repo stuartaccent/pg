@@ -6,6 +6,7 @@ package web
 import (
 	"context"
 	"embed"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"os/exec"
@@ -257,7 +258,10 @@ func (s *Server) connectService(w http.ResponseWriter, r *http.Request) {
 	s.service, s.base, s.readOnly, s.connect, s.dsn, s.settings, s.image = service, base, readOnly, connect, dsn, settings, image
 	s.cat = catalog.New(connect)
 	s.mu.Unlock()
-	w.Header().Set("HX-Trigger", "connected, services-changed") // reloads the tree and the dropdown
+	// Reloads the tree and the dropdown. The name is for remembering, as the
+	// dropdown hasn't caught up when Connect was a job's button.
+	trigger, _ := json.Marshal(map[string]string{"connected": service, "services-changed": ""})
+	w.Header().Set("HX-Trigger", string(trigger))
 	render(w, r, ConnectStatus(service, readOnly, nil))
 }
 
