@@ -7,4 +7,5 @@ join pg_class c on c.oid = i.indexrelid
 join pg_class t on t.oid = i.indrelid
 join pg_namespace n on n.oid = t.relnamespace
 where not i.indisvalid
+	and c.relkind <> 'I' -- a partitioned index made on only the parent, waiting for its partitions
 order by 1, 2, 3;

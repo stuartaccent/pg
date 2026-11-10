@@ -18,6 +18,7 @@ func TestHealth(t *testing.T) {
 		"create index health_desc on health_child (id desc)",
 		"create temp table health_parts (parent_id int references health_parent) partition by range (parent_id)",
 		"create temp table health_parts_1 partition of health_parts for values from (0) to (10)",
+		"create index health_only on only health_parts (parent_id)",
 	} {
 		if _, err := c.read(ctx, sql, nil); err != nil {
 			t.Fatal(err)
@@ -62,6 +63,9 @@ func TestHealth(t *testing.T) {
 	}
 	if !has("Duplicate indexes", "health_a, health_b") {
 		t.Errorf("duplicates not found: %v", found["Duplicate indexes"].Rows)
+	}
+	if has("Invalid indexes", "health_only") {
+		t.Error("a partitioned index waiting for its partitions is invalid")
 	}
 	if has("Duplicate indexes", "health_desc") {
 		t.Error("an index sorted the other way is a duplicate")
