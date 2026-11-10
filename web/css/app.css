@@ -1,6 +1,6 @@
 @import "tailwindcss" source(none);
 
-@source "../views.templ";
+@source "../*.templ";
 @source "../js/app.js";
 
 /* Two tuned themes in place of daisyUI's own, under the same names, so

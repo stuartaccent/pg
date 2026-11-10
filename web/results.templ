@@ -1,0 +1,171 @@
+package web
+
+import (
+	"fmt"
+	"net/url"
+	"strings"
+	"time"
+
+	"pg/internal/session"
+)
+
+templ Results(p session.Page, tab string) {
+	if p.Plan != "" {
+		@planView(p)
+	} else if len(p.Columns) == 0 {
+		@summary(p)
+	} else if isPlan(p) {
+		<pre class="p-2 font-mono text-xs">
+			for _, row := range p.Rows {
+				<div class={ templ.KV("text-warning", strings.Contains(row[0].Text, "Seq Scan")) }>{ row[0].Text }</div>
+			}
+		</pre>
+		@summary(p)
+	} else {
+		<table class="table table-xs table-pin-rows font-mono text-[12px] [&_th]:bg-base-200 [&_th]:font-sans [&_th]:text-[11px] [&_th]:font-semibold [&_th]:text-base-content [&_:is(th,td)]:border-r [&_:is(th,td)]:border-base-content/5">
+			<thead>
+				<tr>
+					for i, c := range p.Columns {
+						if i < len(p.Sources) && p.Sources[i].Table != 0 {
+							<th data-table={ fmt.Sprint(p.Sources[i].Table) } data-attr={ fmt.Sprint(p.Sources[i].Attr) }>{ c }</th>
+						} else {
+							<th>{ c }</th>
+						}
+					}
+				</tr>
+			</thead>
+			<tbody>
+				@MoreRows(p, tab)
+			</tbody>
+		</table>
+	}
+}
+
+// planView shows what Explain returned as a tree, or as it came if that fails.
+templ planView(p session.Page) {
+	if tree, err := parsePlan(p.Plan); err != nil {
+		<pre class="p-2 font-mono text-xs">{ p.Plan }</pre>
+	} else {
+		<div class="p-2 text-sm">
+			<ul>
+				@planStep(tree.Root)
+			</ul>
+		</div>
+		<div class="flex items-center gap-3 pr-2">
+			<div class="flex-1 min-w-0">
+				@summary(p)
+			</div>
+			if tree.Timing != "" {
+				<span class="text-xs text-base-content/60">{ tree.Timing }</span>
+			}
+			<button type="button" class="btn btn-ghost btn-xs" data-plan={ p.Plan } onclick="copyPlan(this)">Copy JSON</button>
+		</div>
+	}
+}
+
+templ planStep(n *planNode) {
+	<li>
+		<details>
+			<summary class="flex flex-wrap items-center gap-x-3 gap-y-0.5 rounded px-1 py-0.5 cursor-pointer hover:bg-base-200">
+				<span class="w-20 h-2 shrink-0 overflow-hidden rounded-full bg-base-300" title={ fmt.Sprintf("%.0f%% of the plan", n.Share*100) }>
+					<span class={ "block h-full", templ.KV("bg-warning", n.Slowest), templ.KV("bg-primary", !n.Slowest) } style={ fmt.Sprintf("width:%.1f%%", n.Share*100) }></span>
+				</span>
+				<span class={ "font-medium", templ.KV("text-warning", n.SeqScan) }>{ n.Type }</span>
+				if n.Target != "" {
+					<span class="font-mono text-xs">{ n.Target }</span>
+				}
+				<span class="text-xs text-base-content/60">{ n.Stats }</span>
+				if n.Estimate != "" {
+					<span class="badge badge-warning badge-xs">{ n.Estimate }</span>
+				}
+			</summary>
+			<dl class="grid grid-cols-[auto_1fr] gap-x-3 ml-24 my-1 text-xs">
+				for _, d := range n.Details {
+					<dt class="text-base-content/60">{ d.Name }</dt>
+					<dd class="font-mono whitespace-pre-wrap wrap-break-word min-w-0">{ d.Value }</dd>
+				}
+			</dl>
+		</details>
+		if len(n.Children) > 0 {
+			<ul class="ml-3 pl-3 border-l border-base-300">
+				for _, child := range n.Children {
+					@planStep(child)
+				}
+			</ul>
+		}
+	</li>
+}
+
+// MoreRows is a page of rows followed by either a sentinel row that loads
+// the next page when it scrolls into view, or a footer once the query is done.
+templ MoreRows(p session.Page, tab string) {
+	for _, row := range p.Rows {
+		<tr data-row>
+			for _, v := range row {
+				if v.Null {
+					<td data-null class="italic text-base-content/50">NULL</td>
+				} else {
+					<td>{ v.Text }</td>
+				}
+			}
+		</tr>
+	}
+	if p.Done {
+		<tr>
+			<td colspan={ fmt.Sprint(p.NumCols) }>
+				@summary(p)
+			</td>
+		</tr>
+	} else if p.Ended {
+		<!-- Comes in after the table, leaving this row as the table's summary. -->
+		<tr
+			hx-get={ fmt.Sprintf("/query/%d/more?tab=%s&next=1", p.QueryID, url.QueryEscape(tab)) }
+			hx-trigger="intersect once"
+			hx-target="closest table"
+			hx-swap="afterend"
+		>
+			<td colspan={ fmt.Sprint(p.NumCols) }>
+				@summary(p)
+			</td>
+		</tr>
+	} else {
+		<tr
+			hx-get={ fmt.Sprintf("/query/%d/more?tab=%s", p.QueryID, url.QueryEscape(tab)) }
+			hx-trigger="intersect once"
+			hx-swap="outerHTML"
+		>
+			<td colspan={ fmt.Sprint(p.NumCols) } class="text-base-content/60">{ fmt.Sprint(p.Total) } rows so far, loading more…</td>
+		</tr>
+	}
+}
+
+templ summary(p session.Page) {
+	<div class="p-2">
+		if p.Err != nil {
+			<span class="text-error whitespace-pre-wrap">{ p.Err.Error() }</span>
+		} else {
+			<span class="text-success">{ summaryText(p) }</span>
+		}
+	</div>
+}
+
+// isPlan reports whether p is an EXPLAIN typed into the editor, which reads
+// better as text than as a one-column grid.
+func isPlan(p session.Page) bool {
+	return p.Done && len(p.Columns) == 1 && p.Columns[0] == "QUERY PLAN"
+}
+
+func summaryText(p session.Page) string {
+	parts := make([]string, 0, len(p.Tags)+2)
+	if p.NumCols > 0 {
+		parts = append(parts, fmt.Sprintf("%d rows", p.Total))
+	}
+	parts = append(parts, p.Tags...)
+	// Finer under a second, where a nearby server's round trip is well under 1ms.
+	precision := time.Millisecond
+	if p.Elapsed < time.Second {
+		precision = 10 * time.Microsecond
+	}
+	parts = append(parts, p.Elapsed.Round(precision).String())
+	return strings.Join(parts, " · ")
+}

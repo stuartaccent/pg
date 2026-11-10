@@ -1,0 +1,121 @@
+package web
+
+import (
+	"net/url"
+
+	"pg/internal/catalog"
+)
+
+// TreeNodes is one level of the tree. A node's children load the first time
+// it is opened, or the next time after a failure.
+templ TreeNodes(nodes []catalog.Node, err error) {
+	if err != nil {
+		<li class="tree-error text-error whitespace-pre-wrap px-2">{ err.Error() }</li>
+	} else if len(nodes) == 0 {
+		<li class="text-base-content/50 px-2">None</li>
+	}
+	for _, n := range nodes {
+		<li>
+			if n.Kind != "" {
+				<details hx-get={ treeURL(n.Kind, n.ID) } hx-trigger="toggle[target.open && target.querySelectorAll(':scope > ul > li > .loading, :scope > ul > .tree-error').length > 0]" hx-target="find ul">
+					<summary>
+						@treeLabel(n)
+					</summary>
+					<ul>
+						<li><span class="loading loading-spinner loading-xs"></span></li>
+					</ul>
+				</details>
+			} else {
+				<div>
+					@treeLabel(n)
+				</div>
+			}
+		</li>
+	}
+}
+
+templ treeLabel(n catalog.Node) {
+	<span class="group flex items-baseline gap-2 min-w-0 w-full">
+		if icon := nodeIcon(n); icon != "" {
+			<i data-lucide={ icon } class={ "size-3.5 shrink-0 self-center", nodeIconColour(icon) } aria-hidden="true"></i>
+		}
+		if n.SQL != "" {
+			<button type="button" class="cursor-pointer min-w-0 truncate hover:underline" title={ n.Label } data-sql={ n.SQL } onclick="useSQL(event, this)">{ n.Label }</button>
+		} else if n.Def != "" {
+			<button type="button" class="cursor-pointer shrink-0 max-w-full truncate hover:underline" title={ n.Label } data-url={ definitionURL(n) } onclick="useDefinition(event, this)">{ n.Label }</button>
+		} else {
+			<span class="shrink-0 max-w-full truncate" title={ n.Label }>{ n.Label }</span>
+		}
+		if n.Detail != "" {
+			<span class="truncate shrink-1000 text-base-content/50" title={ n.Detail }>{ n.Detail }</span>
+		}
+		if n.SQL != "" && n.Def != "" {
+			<button type="button" class="cursor-pointer shrink-0 ml-auto text-base-content/60 opacity-0 hover:underline group-hover:opacity-100 focus:opacity-100" aria-label={ "Show the definition of " + n.Label } data-url={ definitionURL(n) } onclick="useDefinition(event, this)">DDL</button>
+		}
+	</span>
+}
+
+// nodeIcon is the Lucide icon for a tree node: by what it opens to, or for a
+// leaf, by what its definition is. Columns and the like have none.
+func nodeIcon(n catalog.Node) string {
+	switch n.Kind {
+	case "schema":
+		return "layers"
+	case "roles", "memberof", "members":
+		return "users"
+	case "role":
+		return "user"
+	case "table", "partitioned":
+		return "table-2"
+	case "view":
+		return "eye"
+	case "matview":
+		return "box"
+	case "columns":
+		return "columns-3"
+	case "indexes":
+		return "list-tree"
+	case "constraints":
+		return "shield-check"
+	case "triggers":
+		return "zap"
+	case "grants":
+		return "key-round"
+	case "":
+		switch n.Def {
+		case "function":
+			return "square-function"
+		case "sequence":
+			return "hash"
+		case "type", "domain":
+			return "shapes"
+		case "collation":
+			return "languages"
+		case "role":
+			return "user"
+		}
+		return ""
+	}
+	return "folder"
+}
+
+// nodeIconColour picks out the objects you query, over the folders around them.
+func nodeIconColour(icon string) string {
+	switch icon {
+	case "table-2":
+		return "text-info"
+	case "eye", "box":
+		return "text-secondary"
+	case "square-function":
+		return "text-accent"
+	}
+	return "text-base-content/50"
+}
+
+func treeURL(kind, id string) string {
+	return "/tree?" + url.Values{"kind": {kind}, "id": {id}}.Encode()
+}
+
+func definitionURL(n catalog.Node) string {
+	return "/definition?" + url.Values{"def": {n.Def}, "id": {n.ID}}.Encode()
+}

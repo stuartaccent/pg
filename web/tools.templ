@@ -1,0 +1,130 @@
+package web
+
+import (
+	"fmt"
+
+	"pg/internal/catalog"
+)
+
+// ActivityBody is the Activity tab's content.
+templ ActivityBody(backends []catalog.Backend, canStop bool, err error) {
+	if err != nil {
+		<p class="text-error whitespace-pre-wrap px-3 py-2">{ err.Error() }</p>
+	}
+	if len(backends) > 0 {
+		<table class="table table-sm table-pin-rows font-mono text-xs">
+			<thead>
+				<tr>
+					<th>PID</th>
+					<th>User</th>
+					<th>Database</th>
+					<th>App</th>
+					<th>State</th>
+					<th>For</th>
+					<th>Blocked by</th>
+					<th>Query</th>
+					if canStop {
+						<th></th>
+					}
+				</tr>
+			</thead>
+			<tbody>
+				for _, b := range backends {
+					<tr data-row class={ templ.KV("text-warning", b.BlockedBy != "") }>
+						<td>{ fmt.Sprint(b.PID) }</td>
+						<td>{ b.User }</td>
+						<td>{ b.Database }</td>
+						<td>{ b.App }</td>
+						<td>{ b.State }</td>
+						<td>{ b.For }</td>
+						<td>{ b.BlockedBy }</td>
+						<td>{ b.Query }</td>
+						if canStop {
+							<td class="text-right">
+								if b.State == "active" {
+									<button type="button" class="btn btn-soft btn-xs" hx-post={ fmt.Sprintf("/activity/%d/cancel", b.PID) } hx-target="#activity-body">Cancel</button>
+								}
+								<button type="button" class="btn btn-soft btn-error btn-xs ml-1" hx-post={ fmt.Sprintf("/activity/%d/terminate", b.PID) } hx-target="#activity-body" data-confirm={ fmt.Sprintf("End connection %d of %s to %s? Anything it has open is rolled back.", b.PID, b.User, b.Database) }>Terminate</button>
+							</td>
+						}
+					</tr>
+				}
+			</tbody>
+		</table>
+	} else if err == nil {
+		<p class="text-base-content/50 px-3 py-2">Nothing else is connected.</p>
+	}
+}
+
+// HealthBody is the Health tab's content.
+templ HealthBody(report catalog.Report, err error) {
+	if err != nil {
+		<p class="text-error whitespace-pre-wrap">{ err.Error() }</p>
+	} else {
+		<p class="text-xs text-base-content/60 mb-3">
+			Checks marked usage go by statistics counted
+			if report.StatsSince != "" {
+				since { report.StatsSince },
+			} else {
+				since the database was made or restored,
+			}
+			so on a restored copy they say little about the live server.
+		</p>
+		<div class="tabs tabs-lift tabs-sm">
+			for i, check := range report.Checks {
+				<label class="tab gap-2">
+					<input type="radio" name="health-tab" checked?={ i == 0 }/>
+					{ check.Name }
+					if check.Err != nil {
+						<span class="badge badge-error badge-xs">failed</span>
+					} else if len(check.Rows) > 0 {
+						<span class="badge badge-warning badge-xs">{ fmt.Sprint(len(check.Rows)) }</span>
+					} else {
+						<span class="badge badge-success badge-xs">none</span>
+					}
+				</label>
+				<!-- Only the table scrolls, with no padding above it for rows to show
+				     through over its pinned header. -->
+				<div class="tab-content h-[max(20rem,calc(100vh-12.5rem))] bg-base-100 border-base-300 p-3">
+					<div class="flex flex-col h-full">
+						<div class="flex items-start gap-2 mb-2 shrink-0">
+							<p class="text-sm text-base-content/60">
+								if check.Usage {
+									<span class="badge badge-ghost badge-sm mr-1">usage</span>
+								}
+								{ check.Reason }
+							</p>
+							<button type="button" class="btn btn-ghost btn-xs ml-auto shrink-0" data-sql={ check.SQL } onclick="useSQL(event, this)">Open as query</button>
+						</div>
+						if check.Err != nil {
+							<p class="text-error text-sm whitespace-pre-wrap">{ check.Err.Error() }</p>
+						} else if len(check.Rows) > 0 {
+							<div class="results flex-1 min-h-0 overflow-auto">
+								<table class="table table-sm table-pin-rows font-mono text-xs">
+									<thead>
+										<tr>
+											for _, c := range check.Columns {
+												<th>{ c }</th>
+											}
+										</tr>
+									</thead>
+									<tbody>
+										for _, row := range check.Rows {
+											<tr>
+												for _, v := range row {
+													<td title={ v }>{ v }</td>
+												}
+											</tr>
+										}
+									</tbody>
+								</table>
+							</div>
+						} else {
+							<p class="text-sm text-success">Nothing found.</p>
+						}
+					</div>
+				</div>
+			}
+		</div>
+	}
+}
