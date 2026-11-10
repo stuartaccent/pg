@@ -605,3 +605,18 @@ func TestSearchPathIsRemembered(t *testing.T) {
 		t.Errorf("search_path = %q", got)
 	}
 }
+
+func TestCopiesToClient(t *testing.T) {
+	for sql, want := range map[string]bool{
+		"copy t from stdin":                   true,
+		"copy t to stdout":                    true,
+		"select 1; copy (select 1) to stdout": true,
+		"copy t to '/tmp/x'":                  false,
+		"copy t from program 'cat'":           false,
+		"select 'copy t to stdout'":           false,
+	} {
+		if got := copiesToClient(sql); got != want {
+			t.Errorf("%q: got %v", sql, got)
+		}
+	}
+}

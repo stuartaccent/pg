@@ -192,3 +192,18 @@ func TestSettingsDatabase(t *testing.T) {
 		}
 	}
 }
+
+// A database name comes from the page, so quoting is all that keeps it from
+// adding settings of its own, such as another host.
+func TestWithDatabaseQuotes(t *testing.T) {
+	for _, db := range []string{"plain", "a'b", `a\b`, "x' host='evil", `x\' host=evil`} {
+		cfg, err := pgconn.ParseConfig(WithDatabase("host=h user=u", db))
+		if err != nil {
+			t.Errorf("%q: %v", db, err)
+			continue
+		}
+		if cfg.Host != "h" || cfg.Database != db {
+			t.Errorf("%q: host %q, database %q", db, cfg.Host, cfg.Database)
+		}
+	}
+}

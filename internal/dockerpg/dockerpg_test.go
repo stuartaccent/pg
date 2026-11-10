@@ -884,3 +884,27 @@ func TestRunSurvivesALongLine(t *testing.T) {
 		t.Fatal("run hung until the timeout")
 	}
 }
+
+// pg_restore exits non-zero for skipped errors and real failures alike.
+func TestRunRestoreTellsSkippedFromFailed(t *testing.T) {
+	sh := func(ctx context.Context, script string) *exec.Cmd {
+		return exec.CommandContext(ctx, "sh", "-c", script)
+	}
+	quiet := func(string) {}
+	skipped := `echo 'pg_restore: error: could not execute query: ERROR:  role "x" does not exist' >&2; echo 'pg_restore: warning: errors ignored on restore: 2' >&2; exit 1`
+
+	got, err := runRestore(context.Background(), sh(context.Background(), skipped), quiet)
+	if err != nil || got.Count != 2 || got.First != `role "x" does not exist` {
+		t.Errorf("skipped = %+v, %v", got, err)
+	}
+	if _, err := runRestore(context.Background(), sh(context.Background(), "echo boom >&2; exit 1"), quiet); err == nil {
+		t.Error("a failure counted as success")
+	}
+	// Stopped after a skipped error is still stopped.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stopped := `echo 'pg_restore: warning: errors ignored on restore: 1' >&2; sleep 5`
+	if _, err := runRestore(ctx, sh(ctx, stopped), func(string) { cancel() }); err == nil {
+		t.Error("a stopped restore counted as success")
+	}
+}

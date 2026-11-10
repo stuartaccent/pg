@@ -1403,3 +1403,15 @@ func TestHxValsIsJSON(t *testing.T) {
 		t.Errorf("got %v, %v", got, err)
 	}
 }
+
+// The page hears once that a job finished, and a Replace reloads the tree.
+func TestFinishedJobTriggersOnce(t *testing.T) {
+	s := New()
+	s.job = &job{label: "Replace", done: true, result: jobResult{Text: "Replaced", Reload: true}}
+	if got := get(t, s, http.MethodGet, "/job").Header().Get("HX-Trigger"); got != "services-changed, connected" {
+		t.Errorf("first = %q", got)
+	}
+	if got := get(t, s, http.MethodGet, "/job").Header().Get("HX-Trigger"); got != "" {
+		t.Errorf("second = %q", got)
+	}
+}

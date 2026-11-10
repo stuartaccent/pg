@@ -60,7 +60,6 @@ func (j *job) view() jobView {
 	return jobView{Label: j.label, Line: j.line, Result: j.result, Running: !j.done, Err: j.err}
 }
 
-// RunningJob returns the label of the job in progress, or "" if there isn't one.
 // OpenTransactions counts the tabs whose last run left a transaction open,
 // which quitting would roll back.
 func (s *Server) OpenTransactions() int {
@@ -75,6 +74,7 @@ func (s *Server) OpenTransactions() int {
 	return n
 }
 
+// RunningJob returns the label of the job in progress, or "" if there isn't one.
 func (s *Server) RunningJob() string {
 	s.mu.Lock()
 	j := s.job
