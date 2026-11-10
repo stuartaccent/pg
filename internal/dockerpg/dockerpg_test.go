@@ -817,3 +817,29 @@ func TestSandboxURL(t *testing.T) {
 		t.Errorf("database = %q", sb.Database())
 	}
 }
+
+func TestPsqlCommand(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	cmd, err := PsqlCommand(conn.Settings{Host: "localhost", Port: 5418, User: "postgres", Password: "it's", Database: "app"}, "postgres:18", "/Users/me/pg-queries")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(cmd, " -v '/Users/me/pg-queries:/queries:ro' -w /queries 'postgres:18' psql;") {
+		t.Errorf("queries not mounted: %s", cmd)
+	}
+	// The env file is the quoted word after --env-file, deleted at the end.
+	_, rest, _ := strings.Cut(cmd, "--env-file '")
+	path, _, _ := strings.Cut(rest, "'")
+	if !strings.HasSuffix(cmd, "psql; rm -f '"+path+"'") {
+		t.Errorf("cmd = %s", cmd)
+	}
+	info, err := os.Stat(path)
+	if err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("env file: %v, %v", info, err)
+	}
+	b, _ := os.ReadFile(path)
+	want := "PGHOST=host.docker.internal\nPGPORT=5418\nPGUSER=postgres\nPGPASSWORD=it's\nPGDATABASE=app\n"
+	if string(b) != want {
+		t.Errorf("env file = %q", b)
+	}
+}

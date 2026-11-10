@@ -72,6 +72,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /connect", s.connectService)
 	mux.HandleFunc("GET /services", s.services)
 	mux.HandleFunc("POST /config/{file}", s.editConfig)
+	mux.HandleFunc("POST /psql", s.openPsql)
 	mux.HandleFunc("GET /backups", s.backups)
 	mux.HandleFunc("POST /backups/open", s.openBackups)
 	mux.HandleFunc("POST /backup", s.backup)
@@ -329,6 +330,52 @@ func (s *Server) editConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// openTerminal runs an AppleScript, to open Terminal. It's a variable for the tests.
+var openTerminal = func(script string) error {
+	return exec.Command("osascript", "-e", script).Run()
+}
+
+// openPsql opens psql in Terminal on the current connection, database and all.
+// It runs in the server's own Postgres image, so its version always matches.
+func (s *Server) openPsql(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	connected, settings, image := s.dsn != "", s.settings, s.image
+	s.mu.Unlock()
+	if !connected {
+		render(w, r, ConnectStatus("", false, errors.New("connect to a service first")))
+		return
+	}
+	dir, err := queryDir()
+	var cmd string
+	if err == nil {
+		cmd, err = dockerpg.PsqlCommand(settings, image, dir)
+	}
+	if err == nil {
+		err = openTerminal(terminalScript(cmd))
+	}
+	if err != nil {
+		render(w, r, ConnectStatus("", false, err))
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// terminalScript is the AppleScript that runs a shell command in a new Terminal
+// window. Launching Terminal opens a window of its own, so then it uses that
+// one rather than leave an empty one beside it.
+func terminalScript(cmd string) string {
+	cmd = `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(cmd) + `"`
+	return `set wasRunning to application "Terminal" is running
+tell application "Terminal"
+	if wasRunning then
+		do script ` + cmd + `
+	else
+		do script ` + cmd + ` in window 1
+	end if
+	activate
+end tell`
 }
 
 func (s *Server) newTab(w http.ResponseWriter, r *http.Request) {

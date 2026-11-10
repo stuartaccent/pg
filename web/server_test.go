@@ -636,6 +636,38 @@ func TestEditConfig(t *testing.T) {
 	}
 }
 
+func TestOpenPsql(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	var scripts []string
+	real := openTerminal
+	openTerminal = func(script string) error {
+		scripts = append(scripts, script)
+		return nil
+	}
+	t.Cleanup(func() { openTerminal = real })
+
+	s := New()
+	if got := get(t, s, http.MethodPost, "/psql").Body.String(); !strings.Contains(got, "connect to a service first") || len(scripts) != 0 {
+		t.Errorf("unconnected: %q, %v", got, scripts)
+	}
+	s.dsn, s.settings, s.image = "service=x", conn.Settings{Host: "127.0.0.1", Port: 5418, User: "postgres"}, "postgres:18"
+	if got := get(t, s, http.MethodPost, "/psql").Code; got != http.StatusNoContent || len(scripts) != 1 {
+		t.Fatalf("status = %d, scripts = %v", got, scripts)
+	}
+	if !strings.Contains(scripts[0], "-v '"+home+"/pg-queries:/queries:ro' -w /queries 'postgres:18' psql; rm -f ") {
+		t.Errorf("script = %s", scripts[0])
+	}
+}
+
+func TestTerminalScriptEscapes(t *testing.T) {
+	want := `do script "echo 'a\\b' \"c\""`
+	if got := terminalScript(`echo 'a\b' "c"`); !strings.Contains(got, want) {
+		t.Errorf("script = %s\nwant %s", got, want)
+	}
+}
+
 func TestFailedConnectResetsTheDropdown(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "services")
 	t.Setenv("PGSERVICEFILE", file)

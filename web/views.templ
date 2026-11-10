@@ -51,6 +51,9 @@ templ Index(services []string, current string, readOnly bool, j jobView, err err
 					<div class="tooltip tooltip-bottom" data-tip="Backups">
 						<button type="button" class="btn btn-ghost btn-sm btn-square" aria-label="Backups" onclick="showBackups()"><i data-lucide="archive" class="size-4"></i></button>
 					</div>
+					<div class="tooltip tooltip-bottom" data-tip="psql">
+						<button type="button" class="btn btn-ghost btn-sm btn-square" aria-label="Open psql in Terminal" hx-post="/psql" hx-target="#status"><i data-lucide="square-terminal" class="size-4"></i></button>
+					</div>
 					<details class="dropdown dropdown-end">
 						<summary class="btn btn-ghost btn-sm btn-square" aria-label="Config" title="Config"><i data-lucide="settings" class="size-4"></i></summary>
 						<ul class="menu menu-sm dropdown-content z-10 mt-1 w-48 rounded-box border border-base-content/10 bg-base-200 p-1 shadow-xl">

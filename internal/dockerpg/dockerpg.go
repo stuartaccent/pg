@@ -176,6 +176,37 @@ func Backup(ctx context.Context, s conn.Settings, image, dest string, schemaOnly
 	return os.Rename(partial, dest)
 }
 
+// PsqlCommand returns a shell command that runs psql from image, interactively,
+// on s. It starts in dir, mounted read-only at /queries, so \i runs the files
+// there by their paths in dir. The connection details go in a file only the
+// user can read, which the command deletes when psql exits, so the password
+// isn't on screen or in the shell's history.
+//
+// shortcut: the file stays in the temp folder if the terminal is killed
+// mid-session. Clean up old ones at startup if that turns out to happen.
+func PsqlCommand(s conn.Settings, image, dir string) (string, error) {
+	f, err := os.CreateTemp("", "pg-psql-*.env")
+	if err != nil {
+		return "", err
+	}
+	_, err = fmt.Fprintf(f, "PGHOST=%s\nPGPORT=%d\nPGUSER=%s\nPGPASSWORD=%s\nPGDATABASE=%s\n",
+		containerHost(s.Host), s.Port, s.User, s.Password, s.Database)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		_ = os.Remove(f.Name())
+		return "", err
+	}
+	return fmt.Sprintf("%s run --rm -it --init --env-file %s -v %s -w /queries %s psql; rm -f %[2]s",
+		shellQuote(dockerPath()), shellQuote(f.Name()), shellQuote(dir+":/queries:ro"), shellQuote(image)), nil
+}
+
+// shellQuote quotes v as one word for a POSIX shell.
+func shellQuote(v string) string {
+	return "'" + strings.ReplaceAll(v, "'", `'\''`) + "'"
+}
+
 // Sandbox is a throwaway Postgres in a container, holding a restored backup.
 type Sandbox struct {
 	Name     string
