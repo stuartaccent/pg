@@ -373,6 +373,8 @@ func TestTable(t *testing.T) {
 		`create temp table "Two key" (a int, dropped int, "B" text, c text, primary key ("B", a))`,
 		`alter table "Two key" drop column dropped`,
 		`create temp table nokey (a int)`,
+		`create temp table made (id int, note text, n int generated always as identity, twice int generated always as (id * 2) stored, primary key (id) include (note))`,
+		`create temp table heir () inherits (nokey)`,
 	} {
 		if _, err := c.read(ctx, sql, nil); err != nil {
 			t.Fatal(err)
@@ -391,8 +393,16 @@ func TestTable(t *testing.T) {
 		strings.Contains(string(got.Columns), `"2"`) || string(got.Key) != "[3, 1]" {
 		t.Errorf("table = %s %s %s", got.Name, got.Columns, got.Key)
 	}
-	if got, err := c.Table(ctx, string(oids[0][1])); err != nil || string(got.Key) != "[]" {
-		t.Errorf("no key = %s, %v", got.Key, err)
+	if got, err := c.Table(ctx, string(oids[0][1])); err != nil || string(got.Key) != "[]" || !got.Inherited {
+		t.Errorf("no key = %s, inherited %v, %v", got.Key, got.Inherited, err)
+	}
+	made, err := c.read(ctx, `select 'pg_temp.made'::regclass::oid`, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// An index's included columns aren't part of the key.
+	if got, err := c.Table(ctx, string(made[0][0])); err != nil || string(got.Key) != "[1]" || string(got.Generated) != "[3, 4]" || got.Inherited {
+		t.Errorf("made = key %s, generated %s, inherited %v, %v", got.Key, got.Generated, got.Inherited, err)
 	}
 	if _, err := c.Table(ctx, "0"); err == nil {
 		t.Error("expected an error for a missing table")

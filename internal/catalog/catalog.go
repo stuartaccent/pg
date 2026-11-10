@@ -556,6 +556,12 @@ type Table struct {
 	Name    string          `json:"name"`    // schema-qualified and quoted
 	Columns json.RawMessage `json:"columns"` // quoted names by attnum
 	Key     json.RawMessage `json:"key"`     // the primary key's attnums, empty if it has none
+	// Generated attnums: generated columns, and identity ones that are always
+	// generated, which an update can't set.
+	Generated json.RawMessage `json:"generated"`
+	// Inherited is true of a table others inherit from, the old way, as an
+	// update of it changes theirs too. Partitions don't count.
+	Inherited bool `json:"inherited"`
 }
 
 // Table returns the table with the given oid.
@@ -564,8 +570,11 @@ func (c *Catalog) Table(ctx context.Context, oid string) (Table, error) {
 		select format('%I.%I', n.nspname, c.relname),
 			(select coalesce(json_object_agg(a.attnum, quote_ident(a.attname)), '{}') from pg_attribute a
 			 where a.attrelid = c.oid and a.attnum > 0 and not a.attisdropped),
-			(select coalesce(json_agg(k), '[]') from pg_index i, unnest(i.indkey) k
-			 where i.indrelid = c.oid and i.indisprimary)
+			(select coalesce(json_agg(k), '[]') from pg_index i, unnest(i.indkey[0:i.indnkeyatts - 1]) k
+			 where i.indrelid = c.oid and i.indisprimary),
+			(select coalesce(json_agg(a.attnum), '[]') from pg_attribute a
+			 where a.attrelid = c.oid and a.attnum > 0 and not a.attisdropped and (a.attgenerated <> '' or a.attidentity = 'a')),
+			(c.relkind = 'r' and c.relhassubclass)::text
 		from pg_class c
 		join pg_namespace n on n.oid = c.relnamespace
 		where c.oid = $1`, [][]byte{[]byte(oid)})
@@ -575,7 +584,8 @@ func (c *Catalog) Table(ctx context.Context, oid string) (Table, error) {
 	if len(rows) == 0 {
 		return Table{}, errors.New("object no longer exists")
 	}
-	return Table{Name: string(rows[0][0]), Columns: rows[0][1], Key: rows[0][2]}, nil
+	r := rows[0]
+	return Table{Name: string(r[0]), Columns: r[1], Key: r[2], Generated: r[3], Inherited: string(r[4]) == "true"}, nil
 }
 
 // read runs sql on the catalog's connection, opening it if need be.
