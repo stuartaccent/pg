@@ -39,7 +39,7 @@ const drawIcons = (root) =>
 const sqlLanguage = () => sql({ dialect: PostgreSQL, schema: completions.schemas ?? {}, defaultSchema: completions.defaultSchema || undefined });
 
 // Which names need quotes is the server's call, as reserved words do too.
-const quoteIfNeeded = (name) => (completions.quote?.includes(name) ? `"${name.replaceAll('"', '""')}"` : name);
+const quoteIfNeeded = (name) => (completions.quote?.has(name) ? `"${name.replaceAll('"', '""')}"` : name);
 
 // Offers the columns of the tables in the statement under the cursor. lang-sql
 // only completes them after a table name or alias and a dot.
@@ -554,6 +554,7 @@ async function useDefinition(event, el) {
 // Reloads what the editors complete from, after a connect or refresh.
 async function loadSchema() {
 	completions = await (await fetch("/completions")).json();
+	completions.quote = new Set(completions.quote); // looked up for every column offered
 	for (const view of views.values()) view.dispatch({ effects: language.reconfigure(sqlLanguage()) });
 }
 
@@ -702,8 +703,8 @@ document.addEventListener("htmx:confirm", (event) => {
 		ask(elt.dataset.confirm).then((ok) => ok && event.detail.issueRequest(true));
 		return;
 	}
-	// Connecting elsewhere closes every tab's session.
-	if (elt.matches("form[hx-post='/connect']") && openTransactions() > 0) {
+	// Connecting elsewhere, from the picker or a job's Connect, closes every tab's session.
+	if (elt.matches("[hx-post='/connect']") && openTransactions() > 0) {
 		event.preventDefault();
 		ask("A tab has an open transaction. Connect elsewhere and roll it back?").then((ok) => {
 			if (ok) event.detail.issueRequest(true);

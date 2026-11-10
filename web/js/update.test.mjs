@@ -50,10 +50,21 @@ test("refuses a table that appears twice, so the key matches what was clicked", 
 	assert.match(updateSQL(table, twice, values, 2, false).error, /more than once/);
 });
 
-test("allows a column repeated with the same value, as in select id, *", () => {
+test("allows select id, *, where the copies share the whole key", () => {
+	const single = { ...table, key: [1] };
 	const repeated = [{ table: "10", attr: "1" }, ...headers];
 	const values = [row[0], ...row];
-	assert.equal(updateSQL(table, repeated, values, 3, false).sql, `update public.t\nset "Name" = 'it''s'\nwhere id = '7'\n  and k2 = 'b';\n`);
+	assert.equal(updateSQL(single, repeated, values, 3, false).sql, `update public.t\nset "Name" = 'it''s'\nwhere id = '7';\n`);
+	// With a two-column key, only one is repeated, so the copies could differ.
+	assert.match(updateSQL(table, repeated, values, 3, false).error, /more than once/);
+});
+
+test("refuses a self-join whose repeated column happens to match", () => {
+	// select a.id, a."Name", b."Name" from t a join t b using ("Name")
+	const single = { ...table, key: [1] };
+	const joined = [{ table: "10", attr: "1" }, { table: "10", attr: "3" }, { table: "10", attr: "3" }];
+	const values = [{ text: "7", null: false }, { text: "x", null: false }, { text: "x", null: false }];
+	assert.match(updateSQL(single, joined, values, 2, false).error, /more than once/);
 });
 
 test("refuses a temporary table, which other tabs' sessions can't see", () => {

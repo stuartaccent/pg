@@ -133,6 +133,8 @@ templ MoreRows(p session.Page, tab string) {
 			hx-get={ fmt.Sprintf("/query/%d/more?tab=%s", p.QueryID, url.QueryEscape(tab)) }
 			hx-trigger="intersect once"
 			hx-swap="outerHTML"
+			data-summary
+			data-in-transaction?={ p.InTransaction }
 		>
 			<td colspan={ fmt.Sprint(p.NumCols) } class="text-base-content/60">{ fmt.Sprint(p.Total) } rows so far, loading more…</td>
 		</tr>

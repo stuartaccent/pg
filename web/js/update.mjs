@@ -9,22 +9,24 @@ const literal = (cell) => (cell.null ? "null" : `'${cell.text.replaceAll("'", "'
 // in the result but the key, otherwise only the clicked one.
 export function updateSQL(table, headers, row, column, wholeRow) {
 	const oid = headers[column].table;
-	const at = new Map(); // attnum to result column
-	const same = (a, b) => a.null === b.null && a.text === b.text;
+	const copies = new Map(); // attnum to every result column showing it
 	for (const [i, h] of headers.entries()) {
-		if (h.table !== oid) continue;
-		// A column repeated with the same value, as in select id, *, is
-		// harmless. Different values mean the table is joined to itself, and
-		// the key could come from one copy and the value from another.
-		if (at.has(h.attr) && !same(row[at.get(h.attr)], row[i])) return { error: `${table.name} appears more than once in the results` };
-		if (!at.has(h.attr)) at.set(h.attr, i);
+		if (h.table === oid) copies.set(h.attr, [...(copies.get(h.attr) ?? []), i]);
 	}
+	const at = new Map([...copies].map(([attr, columns]) => [attr, columns[0]]));
 	const clicked = headers[column].attr;
 	if (table.temporary) return { error: `${table.name} is a temporary table, so only the tab that made it can change it` };
 	if (table.inherited) return { error: `Other tables inherit from ${table.name}, and an update would change their rows too` };
 	const key = table.key.map(String);
 	const generated = table.generated.map(String);
 	if (key.length === 0) return { error: `${table.name} has no primary key` };
+	// Columns shown more than once, as by select id, * or a join of the table
+	// to itself, can't be told apart. Only when every copy has the whole key,
+	// equal in each, are they all the same row, whichever was clicked.
+	const most = Math.max(...[...copies.values()].map((columns) => columns.length));
+	const same = (columns) => columns.every((i) => row[i].null === row[columns[0]].null && row[i].text === row[columns[0]].text);
+	const oneRow = [...copies.values()].every(same) && key.every((k) => (copies.get(k)?.length ?? 0) === most);
+	if (most > 1 && !oneRow) return { error: `${table.name} appears more than once in the results, so which row is meant isn't clear` };
 	if (!key.every((k) => at.has(k))) return { error: `The results don't include ${table.name}'s primary key` };
 	if (key.some((k) => row[at.get(k)].null)) return { error: `This row has no ${table.name} row` };
 

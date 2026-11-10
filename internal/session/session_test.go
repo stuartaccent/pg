@@ -620,3 +620,39 @@ func TestCopiesToClient(t *testing.T) {
 		}
 	}
 }
+
+// Selects cut off undo nothing, however many ran before.
+func TestStoppingReadsCarriesOn(t *testing.T) {
+	s := newTestSession(t)
+	if p := s.Run("select 1; select generate_series(1, 1000000)"); p.Done {
+		t.Fatal("expected more to come")
+	}
+	if p := s.Run("select 2"); p.Err != nil {
+		t.Fatalf("after reads = %v", p.Err)
+	}
+}
+
+// A run that opens a transaction and is still paging counts too, though the
+// server hasn't said so yet.
+func TestUnfinishedWritingRunCountsAsInTransaction(t *testing.T) {
+	s := newTestSession(t)
+	if p := s.Run("create temp table paged (id int)"); p.Err != nil {
+		t.Fatal(p.Err)
+	}
+	p := s.Run("begin; insert into paged values (1); select generate_series(1, 1000000)")
+	if p.Done || !p.InTransaction || !s.InTransaction() {
+		t.Fatalf("page = done %v, in transaction %v, %v", p.Done, p.InTransaction, s.InTransaction())
+	}
+}
+
+// Once set, the search_path is read again after each run, as a rollback can
+// undo it.
+func TestSearchPathFollowsARollback(t *testing.T) {
+	s := newTestSession(t)
+	if p := s.Run("begin; set search_path = pg_catalog"); p.Err != nil || s.SearchPath() != "pg_catalog" {
+		t.Fatalf("set = %q, %v", s.SearchPath(), p.Err)
+	}
+	if p := s.Run("rollback"); p.Err != nil || s.SearchPath() == "pg_catalog" {
+		t.Fatalf("after rollback = %q, %v", s.SearchPath(), p.Err)
+	}
+}

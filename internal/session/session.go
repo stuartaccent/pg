@@ -6,7 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
+	"regexp"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -56,7 +56,7 @@ var ErrExpired = errors.New("stopped after five minutes without scrolling, so it
 // result first, when stopping it undid work: Postgres rolls back a statement
 // cut off part way, and the transaction it's in. Running on regardless would
 // hide that, and turn a COMMIT into a ROLLBACK.
-var ErrInterrupted = errors.New("stopping the unfinished result above rolled back what it had done, and any transaction it was in, so this didn't run: run it again to carry on")
+var ErrInterrupted = errors.New("stopping the unfinished result above rolled back the statement it was on, and anything not yet committed with it, so this didn't run: run it again to carry on")
 
 // ErrStale is returned by More when the query it refers to is no longer the
 // current one (a newer query replaced it, or it already finished).
@@ -147,6 +147,7 @@ type query struct {
 	timer   *time.Timer // ends it if the next page isn't asked for
 	armed   int         // counts timers, so one that fired as More stopped it is ignored
 	sql     string
+	reads   bool // whether every statement is a plain select, so cutting it off undoes nothing
 	mrr     *pgconn.MultiResultReader
 	rr      *pgconn.ResultReader // the result set being paged, once found
 	ran     int                  // statements finished so far
@@ -183,7 +184,7 @@ func (s *Session) Run(sql string) (p Page) {
 		return Page{QueryID: q.id, Done: true, Err: ErrCopy}
 	}
 
-	q.mrr, q.sql = s.conn.Exec(ctx, sql), sql
+	q.mrr, q.sql, q.reads = s.conn.Exec(ctx, sql), sql, onlyReads(sql)
 	s.q = q
 	return s.readPage(q)
 }
@@ -277,6 +278,7 @@ func (s *Session) begin() (context.Context, *query, error) {
 		}
 	}
 	if s.conn == nil {
+		s.searchPath.Store(nil) // a new connection starts from the default
 		fresh, err := s.connect(ctx)
 		if err != nil {
 			cancel()
@@ -452,23 +454,25 @@ func (s *Session) closeQuery() (undone bool) {
 	err := q.mrr.Close()
 	q.cancel()
 	s.q = nil
-	return err != nil && (q.ran > 0 || s.conn.TxStatus() == 'E' || !onlyReads(q.sql))
+	return err != nil && (!q.reads || s.conn.TxStatus() == 'E')
 }
 
-// noteTransaction records on a finished page, and for InTransaction, whether
-// the session is left in a transaction. Must be called with mu held.
+// noteTransaction records on a page, and for InTransaction, whether closing
+// the session now would roll something back: an open transaction, or an
+// unfinished query that writes. Part way through a run, the transaction status
+// is still the one from before it, so the second covers a begin inside it.
+// Must be called with mu held.
 func (s *Session) noteTransaction(p *Page) {
-	if !p.Done {
-		return
-	}
-	p.InTransaction = s.conn != nil && !s.conn.IsClosed() && s.conn.TxStatus() != 'I'
+	p.InTransaction = s.conn != nil && !s.conn.IsClosed() && (s.conn.TxStatus() != 'I' || s.q != nil && !s.q.reads)
 	s.inTx.Store(p.InTransaction)
 }
 
 // noteSearchPath reads the search_path back after a query that mentions it,
-// so only those cost a round trip. Must be called with mu held.
+// and after every query once one has, as a rollback, reset or discard can undo
+// it. Sessions that leave it alone never pay the round trip. Must be called
+// with mu held.
 func (s *Session) noteSearchPath(sql string) {
-	if s.conn == nil || s.conn.IsClosed() || !strings.Contains(strings.ToLower(sql), "search_path") {
+	if s.conn == nil || s.conn.IsClosed() || s.searchPath.Load() == nil && !mentionsSearchPath.MatchString(sql) {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -479,6 +483,8 @@ func (s *Session) noteSearchPath(sql string) {
 		s.searchPath.Store(&path)
 	}
 }
+
+var mentionsSearchPath = regexp.MustCompile(`(?i)search_path|set\s+schema`)
 
 // SearchPath returns the search_path a query in the session set, or "" if none
 // has mentioned it.
@@ -497,6 +503,10 @@ func (s *Session) InTransaction() bool {
 
 // onlyReads reports whether every statement in sql is a plain select, so
 // cutting one off undoes nothing. One that can't be parsed counts as writing.
+//
+// shortcut: a select can call a function that writes, which it can't see, so
+// cutting one off is undone without a word. Ask the server whether the
+// transaction wrote anything if that ever bites.
 func onlyReads(sql string) bool {
 	tree, err := pg_query.Parse(sql)
 	if err != nil {
