@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -20,6 +21,10 @@ var openTerminal = func(script string) error {
 	return exec.Command("osascript", "-e", script).Run()
 }
 
+// envFileLife is how long docker gets to read psql's connection details, Terminal
+// opening included. It's a variable for the tests.
+var envFileLife = time.Minute
+
 // openPsql opens psql in Terminal on the current connection, database and all.
 // It runs in the server's own Postgres image, so its version always matches.
 func (s *Server) openPsql(w http.ResponseWriter, r *http.Request) {
@@ -31,17 +36,22 @@ func (s *Server) openPsql(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	dir, err := queryDir()
-	var cmd string
+	var cmd, envFile string
 	if err == nil {
-		cmd, err = dockerpg.PsqlCommand(settings, image, dir)
+		cmd, envFile, err = dockerpg.PsqlCommand(settings, image, dir)
 	}
 	if err == nil {
-		err = openTerminal(terminalScript(cmd))
+		if err = openTerminal(terminalScript(cmd)); err != nil {
+			_ = os.Remove(envFile) // as it never ran, say if macOS wouldn't let pg control Terminal
+		}
 	}
 	if err != nil {
 		render(w, r, ConnectStatus("", false, err))
 		return
 	}
+	// The password needn't outlive docker starting, nor wait for psql to exit,
+	// which a closed Terminal window would stop it seeing.
+	time.AfterFunc(envFileLife, func() { _ = os.Remove(envFile) })
 	w.WriteHeader(http.StatusNoContent)
 }
 

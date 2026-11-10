@@ -180,6 +180,25 @@ func TestBackupThenSandbox(t *testing.T) {
 	}
 }
 
+// Names repeat when the clocks go back, and the earlier backup must survive.
+func TestBackupNeverReplacesOne(t *testing.T) {
+	s, image := settings(t)
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "x.backup")
+	if err := os.WriteFile(dest, []byte("earlier"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := Backup(context.Background(), s, image, dest, true, func(string) {}); err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("err = %v", err)
+	}
+	if b, _ := os.ReadFile(dest); string(b) != "earlier" {
+		t.Error("the earlier backup was replaced")
+	}
+	if files, _ := filepath.Glob(filepath.Join(dir, "*")); len(files) != 1 {
+		t.Errorf("left behind: %v", files)
+	}
+}
+
 func TestFailedBackupLeavesNothing(t *testing.T) {
 	_, image := settings(t)
 	dest := filepath.Join(t.TempDir(), "x.backup")
@@ -300,6 +319,9 @@ func TestSameDatabase(t *testing.T) {
 		if SameDatabase(name, other) {
 			t.Errorf("matched %q", other)
 		}
+	}
+	if SameDatabase(BackupName("app-pg_audit", "postgres:17", time.Now()), "app") {
+		t.Error("app matched app-pg_audit's backup")
 	}
 }
 
@@ -826,7 +848,7 @@ func TestSandboxURL(t *testing.T) {
 
 func TestPsqlCommand(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
-	cmd, err := PsqlCommand(conn.Settings{Host: "localhost", Port: 5418, User: "postgres", Password: "it's", Database: "app"}, "postgres:18", "/Users/me/pg-queries")
+	cmd, envFile, err := PsqlCommand(conn.Settings{Host: "localhost", Port: 5418, User: "postgres", Password: "it's", Database: "app"}, "postgres:18", "/Users/me/pg-queries")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -836,7 +858,7 @@ func TestPsqlCommand(t *testing.T) {
 	// The env file is the quoted word after --env-file, deleted at the end.
 	_, rest, _ := strings.Cut(cmd, "--env-file '")
 	path, _, _ := strings.Cut(rest, "'")
-	if !strings.HasSuffix(cmd, "psql; rm -f '"+path+"'") {
+	if path != envFile || !strings.HasSuffix(cmd, "psql; rm -f '"+path+"'") {
 		t.Errorf("cmd = %s", cmd)
 	}
 	info, err := os.Stat(path)

@@ -637,16 +637,23 @@ func TestEditConfig(t *testing.T) {
 }
 
 func TestOpenPsql(t *testing.T) {
-	t.Setenv("TMPDIR", t.TempDir())
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	var scripts []string
-	real := openTerminal
+	var refuse error
+	real, life := openTerminal, envFileLife
 	openTerminal = func(script string) error {
 		scripts = append(scripts, script)
-		return nil
+		return refuse
 	}
-	t.Cleanup(func() { openTerminal = real })
+	envFileLife = 50 * time.Millisecond
+	t.Cleanup(func() { openTerminal, envFileLife = real, life })
+	passwordFiles := func() int {
+		found, _ := filepath.Glob(filepath.Join(tmp, "pg-psql-*.env"))
+		return len(found)
+	}
 
 	s := New()
 	if got := get(t, s, http.MethodPost, "/psql").Body.String(); !strings.Contains(got, "connect to a service first") || len(scripts) != 0 {
@@ -658,6 +665,19 @@ func TestOpenPsql(t *testing.T) {
 	}
 	if !strings.Contains(scripts[0], "-v '"+home+"/pg-queries:/queries:ro' -w /queries 'postgres:18' psql; rm -f ") {
 		t.Errorf("script = %s", scripts[0])
+	}
+	// The password file goes once docker has had time to read it, whatever psql does.
+	if passwordFiles() != 1 {
+		t.Error("password file gone before docker could read it")
+	}
+	time.Sleep(200 * time.Millisecond)
+	if passwordFiles() != 0 {
+		t.Error("password file left after docker had time to start")
+	}
+	// And at once if Terminal never opened.
+	refuse = errors.New("not allowed to send Apple events to Terminal")
+	if got := get(t, s, http.MethodPost, "/psql").Body.String(); !strings.Contains(got, "not allowed") || passwordFiles() != 0 {
+		t.Errorf("refused: %q, %d password files", got, passwordFiles())
 	}
 }
 

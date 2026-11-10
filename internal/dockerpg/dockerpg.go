@@ -180,21 +180,26 @@ func Backup(ctx context.Context, s conn.Settings, image, dest string, schemaOnly
 		_ = os.Remove(partial)
 		return fmt.Errorf("backup failed: %w: %s", err, strings.Join(last, " "))
 	}
+	// Names go to the second in local time, which repeats when the clocks go
+	// back, and a rename would replace the earlier backup without a word.
+	if _, err := os.Lstat(dest); err == nil {
+		_ = os.Remove(partial)
+		return errors.New(filepath.Base(dest) + " already exists: back up again in a second")
+	}
 	return os.Rename(partial, dest)
 }
 
 // PsqlCommand returns a shell command that runs psql from image, interactively,
 // on s. It starts in dir, mounted read-only at /queries, so \i runs the files
-// there by their paths in dir. The connection details go in a file only the
-// user can read, which the command deletes when psql exits, so the password
-// isn't on screen or in the shell's history.
-//
-// shortcut: the file stays in the temp folder if the terminal is killed
-// mid-session. Clean up old ones at startup if that turns out to happen.
-func PsqlCommand(s conn.Settings, image, dir string) (string, error) {
+// there by their paths in dir. The connection details go in envFile, which
+// only the user can read, so the password isn't on screen or in the shell's
+// history. The command deletes it when psql exits, but docker only needs it
+// to start, so the caller should delete it too, once the command has had time
+// to begin or if it never ran.
+func PsqlCommand(s conn.Settings, image, dir string) (cmd, envFile string, err error) {
 	f, err := os.CreateTemp("", "pg-psql-*.env")
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	_, err = fmt.Fprintf(f, "PGHOST=%s\nPGPORT=%d\nPGUSER=%s\nPGPASSWORD=%s\nPGDATABASE=%s\n",
 		containerHost(s.Host), s.Port, s.User, s.Password, s.Database)
@@ -203,10 +208,10 @@ func PsqlCommand(s conn.Settings, image, dir string) (string, error) {
 	}
 	if err != nil {
 		_ = os.Remove(f.Name())
-		return "", err
+		return "", "", err
 	}
 	return fmt.Sprintf("%s run --rm -it --init --env-file %s -v %s -w /queries %s psql; rm -f %[2]s",
-		shellQuote(dockerPath()), shellQuote(f.Name()), shellQuote(dir+":/queries:ro"), shellQuote(image)), nil
+		shellQuote(dockerPath()), shellQuote(f.Name()), shellQuote(dir+":/queries:ro"), shellQuote(image)), f.Name(), nil
 }
 
 // shellQuote quotes v as one word for a POSIX shell.

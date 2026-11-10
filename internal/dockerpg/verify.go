@@ -156,7 +156,9 @@ func Differences(backup, live map[string]int64) []string {
 	return found
 }
 
-// SameDatabase reports whether a backup made by pg came from database.
+// SameDatabase reports whether a backup made by pg came from database: all of
+// the name before the version, so app doesn't match app-pg_audit's backups.
 func SameDatabase(backupName, database string) bool {
-	return database != "" && strings.HasPrefix(backupName, unsafeInName.ReplaceAllString(database, "_")+"-pg")
+	loc := versionInName.FindStringIndex(backupName)
+	return database != "" && loc != nil && backupName[:loc[0]] == unsafeInName.ReplaceAllString(database, "_")
 }
