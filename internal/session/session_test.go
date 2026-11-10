@@ -521,3 +521,74 @@ func TestCopyToTheClientIsRefused(t *testing.T) {
 		}
 	}
 }
+
+// Cutting off a result Postgres is still sending rolls back its statement and
+// the transaction it's in. The next run says so rather than carrying on.
+func TestStoppingAnUnfinishedResultThatUndidWorkSaysSo(t *testing.T) {
+	s := newTestSession(t)
+	if p := s.Run("create temp table undone (id int)"); p.Err != nil {
+		t.Fatal(p.Err)
+	}
+	big := "select generate_series(1, 1000000)"
+	count := func() string {
+		t.Helper()
+		p := s.Run("select count(*) from undone")
+		if p.Err != nil {
+			t.Fatal(p.Err)
+		}
+		return p.Rows[0][0].Text
+	}
+
+	// In a transaction: the commit after it would have been a rollback.
+	if p := s.Run("begin; insert into undone values (1)"); p.Err != nil || !p.InTransaction || !s.InTransaction() {
+		t.Fatalf("begin = %+v", p)
+	}
+	if p := s.Run(big); p.Done {
+		t.Fatal("expected more to come")
+	}
+	if p := s.Run("commit"); !errors.Is(p.Err, ErrInterrupted) {
+		t.Fatalf("commit = %v, want ErrInterrupted", p.Err)
+	}
+	if p := s.Run("rollback"); p.Err != nil || p.InTransaction || s.InTransaction() {
+		t.Fatalf("rollback = %+v", p)
+	}
+	if got := count(); got != "0" {
+		t.Fatalf("count = %s", got)
+	}
+
+	// In one run with the write before it.
+	if p := s.Run("insert into undone values (1); " + big); p.Done {
+		t.Fatal("expected more to come")
+	}
+	if p := s.Run("select 1"); !errors.Is(p.Err, ErrInterrupted) {
+		t.Fatalf("after a write = %v, want ErrInterrupted", p.Err)
+	}
+	if got := count(); got != "0" {
+		t.Fatalf("count = %s", got)
+	}
+
+	// A plain select undoes nothing, so the next run just runs.
+	if p := s.Run(big); p.Done {
+		t.Fatal("expected more to come")
+	}
+	if p := s.Run("select 1"); p.Err != nil {
+		t.Fatalf("after a select = %v", p.Err)
+	}
+}
+
+func TestOnlyReads(t *testing.T) {
+	for sql, want := range map[string]bool{
+		"select 1":                      true,
+		"select 1; select 2":            true,
+		"with a as (select 1) select 1": true,
+		"insert into t values (1)":      false,
+		"select 1 into t":               false,
+		"with d as (delete from t returning *) select * from d": false,
+		"set work_mem = '1GB'; select 1":                        false,
+		"not sql at all":                                        false,
+	} {
+		if got := onlyReads(sql); got != want {
+			t.Errorf("%q: got %v", sql, got)
+		}
+	}
+}

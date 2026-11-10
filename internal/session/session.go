@@ -51,6 +51,12 @@ var ErrOneStatement = errors.New("explain takes one statement at a time: select 
 // ErrExpired ends a result whose next page wasn't asked for in time.
 var ErrExpired = errors.New("stopped after five minutes without scrolling, so it wouldn't keep holding locks: run it again for the rest")
 
+// ErrInterrupted is returned by a run that had to stop the tab's unfinished
+// result first, when stopping it undid work: Postgres rolls back a statement
+// cut off part way, and the transaction it's in. Running on regardless would
+// hide that, and turn a COMMIT into a ROLLBACK.
+var ErrInterrupted = errors.New("stopping the unfinished result above rolled back what it had done, and any transaction it was in, so this didn't run: run it again to carry on")
+
 // ErrStale is returned by More when the query it refers to is no longer the
 // current one (a newer query replaced it, or it already finished).
 var ErrStale = errors.New("query is no longer running")
@@ -105,6 +111,9 @@ type Page struct {
 	Tags    []string // command tags, e.g. "SELECT 12", "UPDATE 3"
 	Err     error
 	Elapsed time.Duration // time spent running, not waiting for the next page to be asked for
+
+	// InTransaction is set with Done if the session is left in a transaction.
+	InTransaction bool
 }
 
 // Session owns one connection. Run, More and Close serialise on mu;
@@ -122,12 +131,17 @@ type Session struct {
 
 	cancelMu sync.Mutex
 	cancel   context.CancelFunc // cancels the most recent query
+
+	// inTx is whether the last finished query left a transaction open. Not
+	// guarded by mu, so quitting can ask while a query runs.
+	inTx atomic.Bool
 }
 
 type query struct {
 	id      uint64
 	timer   *time.Timer // ends it if the next page isn't asked for
 	armed   int         // counts timers, so one that fired as More stopped it is ignored
+	sql     string
 	mrr     *pgconn.MultiResultReader
 	rr      *pgconn.ResultReader // the result set being paged, once found
 	ran     int                  // statements finished so far
@@ -149,11 +163,12 @@ func New(conn *pgconn.PgConn, connect func(context.Context) (*pgconn.PgConn, err
 //
 // sql may hold several statements. Each one that returns columns is a result
 // of its own, see Page.Ended; the others only contribute their command tags.
-func (s *Session) Run(sql string) Page {
+func (s *Session) Run(sql string) (p Page) {
 	s.Cancel()
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	defer s.noteTransaction(&p)
 	ctx, q, err := s.begin()
 	if err != nil {
 		return Page{QueryID: q.id, Done: true, Err: err}
@@ -163,7 +178,7 @@ func (s *Session) Run(sql string) Page {
 		return Page{QueryID: q.id, Done: true, Err: ErrCopy}
 	}
 
-	q.mrr = s.conn.Exec(ctx, sql)
+	q.mrr, q.sql = s.conn.Exec(ctx, sql), sql
 	s.q = q
 	return s.readPage(q)
 }
@@ -173,11 +188,12 @@ func (s *Session) Run(sql string) Page {
 //
 // It uses the extended protocol, which refuses more than one statement. Over
 // Run, "select 1; delete from t" would explain the select and run the delete.
-func (s *Session) Explain(sql string, analyze bool) Page {
+func (s *Session) Explain(sql string, analyze bool) (p Page) {
 	s.Cancel()
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	defer s.noteTransaction(&p)
 	ctx, q, err := s.begin()
 	if err != nil {
 		return Page{QueryID: q.id, Done: true, Err: err}
@@ -202,7 +218,7 @@ func (s *Session) Explain(sql string, analyze bool) Page {
 	}
 
 	res := s.conn.ExecParams(ctx, stmt, nil, nil, nil, nil).Read()
-	p := Page{QueryID: q.id, Done: true, Err: res.Err, Elapsed: time.Since(q.start)}
+	p = Page{QueryID: q.id, Done: true, Err: res.Err, Elapsed: time.Since(q.start)}
 	if res.Err != nil {
 		return p
 	}
@@ -223,7 +239,7 @@ func (s *Session) rollback() {
 // begin abandons the current query and readies the connection for a new one.
 // Must be called with mu held, and after Cancel.
 func (s *Session) begin() (context.Context, *query, error) {
-	s.closeQuery()
+	undone := s.closeQuery()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	s.cancelMu.Lock()
@@ -234,6 +250,10 @@ func (s *Session) begin() (context.Context, *query, error) {
 	if s.closed {
 		cancel()
 		return ctx, q, ErrClosed
+	}
+	if undone {
+		cancel()
+		return ctx, q, ErrInterrupted
 	}
 	if s.conn != nil && !conn.Alive(ctx, s.conn) {
 		// Cancelled while checking, by Cancel or a newer Run: that says nothing
@@ -266,9 +286,10 @@ func (s *Session) begin() (context.Context, *query, error) {
 }
 
 // More returns the next page of query id.
-func (s *Session) More(id uint64) (Page, error) {
+func (s *Session) More(id uint64) (p Page, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	defer s.noteTransaction(&p)
 	if s.expired != nil && s.expired.QueryID == id {
 		return *s.expired, nil
 	}
@@ -296,6 +317,7 @@ func (s *Session) Close(ctx context.Context) error {
 	defer s.mu.Unlock()
 	s.closeQuery()
 	s.closed = true
+	s.inTx.Store(false)
 	if s.conn == nil {
 		return nil
 	}
@@ -382,8 +404,11 @@ func (s *Session) expire(q *query, armed int) {
 		return
 	}
 	q.cancel()
-	s.closeQuery()
-	s.expired = &Page{QueryID: q.id, NumCols: q.ncols, Total: q.total, Done: true, Err: ErrExpired}
+	err := ErrExpired
+	if s.closeQuery() {
+		err = fmt.Errorf("%w. Stopping it also rolled back what it had done, and any transaction it was in", ErrExpired)
+	}
+	s.expired = &Page{QueryID: q.id, NumCols: q.ncols, Total: q.total, Done: true, Err: err}
 }
 
 // finish records the outcome on p and clears the current query. Must be called
@@ -409,16 +434,56 @@ func (s *Session) finish(q *query, p Page) Page {
 
 // closeQuery abandons the current query. Must be called with mu held, and
 // after Cancel so draining the rest of the result is quick.
-func (s *Session) closeQuery() {
+func (s *Session) closeQuery() (undone bool) {
 	if s.q == nil {
+		return false
+	}
+	q := s.q
+	if q.timer != nil {
+		q.timer.Stop()
+	}
+	// An error here means it was cut off, not that it had finished unread.
+	err := q.mrr.Close()
+	q.cancel()
+	s.q = nil
+	return err != nil && (q.ran > 0 || s.conn.TxStatus() == 'E' || !onlyReads(q.sql))
+}
+
+// noteTransaction records on a finished page, and for InTransaction, whether
+// the session is left in a transaction. Must be called with mu held.
+func (s *Session) noteTransaction(p *Page) {
+	if !p.Done {
 		return
 	}
-	if s.q.timer != nil {
-		s.q.timer.Stop()
+	p.InTransaction = s.conn != nil && !s.conn.IsClosed() && s.conn.TxStatus() != 'I'
+	s.inTx.Store(p.InTransaction)
+}
+
+// InTransaction reports whether the last query left a transaction open, which
+// closing the session would roll back.
+func (s *Session) InTransaction() bool {
+	return s.inTx.Load()
+}
+
+// onlyReads reports whether every statement in sql is a plain select, so
+// cutting one off undoes nothing. One that can't be parsed counts as writing.
+func onlyReads(sql string) bool {
+	tree, err := pg_query.Parse(sql)
+	if err != nil {
+		return false
 	}
-	_ = s.q.mrr.Close()
-	s.q.cancel()
-	s.q = nil
+	for _, raw := range tree.Stmts {
+		sel := raw.Stmt.GetSelectStmt()
+		if sel == nil || sel.IntoClause != nil {
+			return false
+		}
+		for _, cte := range sel.GetWithClause().GetCtes() {
+			if cte.GetCommonTableExpr().GetCtequery().GetSelectStmt() == nil {
+				return false // with d as (delete … returning …) select …
+			}
+		}
+	}
+	return true
 }
 
 // copyRow copies a row out of pgconn's buffer, which is reused on the next
