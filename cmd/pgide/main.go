@@ -119,8 +119,10 @@ func askToQuit(app *application.App, job string, open int, quitting, asking *ato
 		if open > 1 {
 			title = fmt.Sprintf("%d tabs have open transactions", open)
 		}
-	} else if open > 0 {
+	} else if open == 1 {
 		message += " It also rolls back the open transaction in a tab."
+	} else if open > 1 {
+		message += fmt.Sprintf(" It also rolls back the open transactions in %d tabs.", open)
 	}
 	dialog := app.Dialog.Question().SetTitle(title).SetMessage(message)
 	dialog.AddButton(quit).OnClick(func() {

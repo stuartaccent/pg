@@ -116,8 +116,6 @@ func writesEveryRow(sql string) bool {
 	return anyWithoutWhere(node)
 }
 
-// anyWithoutWhere walks a parse tree, as JSON, for an UpdateStmt or DeleteStmt
-// with no whereClause. Walking the JSON saves a case for every node type.
 // mergesEveryRow is true of a merge joined on plain true, matching every row,
 // that updates or deletes them with no further condition.
 func mergesEveryRow(stmt map[string]any) bool {
@@ -138,6 +136,8 @@ func mergesEveryRow(stmt map[string]any) bool {
 	return false
 }
 
+// anyWithoutWhere walks a parse tree, as JSON, for an UpdateStmt or DeleteStmt
+// with no whereClause, or a MergeStmt that changes every row. Walking the JSON saves a case for every node type.
 func anyWithoutWhere(node any) bool {
 	switch n := node.(type) {
 	case map[string]any:
@@ -189,7 +189,7 @@ func (s *Server) chooseExport(w http.ResponseWriter, r *http.Request) {
 func (s *Server) export(w http.ResponseWriter, r *http.Request) {
 	tab := r.FormValue("tab")
 	s.mu.Lock()
-	connect, chosen := s.connect, s.exportTo[tab]
+	connect, chosen, sess := s.connect, s.exportTo[tab], s.sessions[tab]
 	delete(s.exportTo, tab)
 	s.mu.Unlock()
 	if connect == nil {
@@ -202,7 +202,7 @@ func (s *Server) export(w http.ResponseWriter, r *http.Request) {
 	}
 	// Its own connection, so it starts with the tab's search_path at least.
 	searchPath := ""
-	if sess := s.session(tab); sess != nil {
+	if sess != nil {
 		searchPath = sess.SearchPath()
 	}
 	path, rows, err := saveCSV(r.Context(), connect, searchPath, r.FormValue("sql"), chosen)
