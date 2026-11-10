@@ -127,6 +127,7 @@ type Session struct {
 type query struct {
 	id      uint64
 	timer   *time.Timer // ends it if the next page isn't asked for
+	armed   int         // counts timers, so one that fired as More stopped it is ignored
 	mrr     *pgconn.MultiResultReader
 	rr      *pgconn.ResultReader // the result set being paged, once found
 	ran     int                  // statements finished so far
@@ -336,12 +337,14 @@ func (s *Session) readPage(q *query) Page {
 			return s.finish(q, p)
 		}
 		p.Ended, p.Tags, p.Elapsed = true, q.tags, q.elapsed+time.Since(q.start)
-		q.tags, q.ncols, q.total = nil, 0, 0
+		q.tags, q.ncols, q.total, q.elapsed, q.start = nil, 0, 0, 0, time.Now()
 	}
 	q.elapsed += time.Since(q.start)
 	// An unread result keeps the query running on the server, with its locks,
 	// so it only gets so long.
-	q.timer = time.AfterFunc(s.idle, func() { s.expire(q) })
+	q.armed++
+	armed := q.armed
+	q.timer = time.AfterFunc(s.idle, func() { s.expire(q, armed) })
 	return p // probably more to come
 }
 
@@ -366,11 +369,11 @@ func (q *query) closeResult(rr *pgconn.ResultReader) {
 	}
 }
 
-// expire ends q if it's still waiting for its next page.
-func (s *Session) expire(q *query) {
+// expire ends q if it's still waiting for the page its timer armed was for.
+func (s *Session) expire(q *query, armed int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.q != q {
+	if s.q != q || q.armed != armed {
 		return
 	}
 	q.cancel()

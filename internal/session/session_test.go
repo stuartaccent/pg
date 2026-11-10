@@ -390,6 +390,33 @@ func TestLosingATransactionIsReported(t *testing.T) {
 	}
 }
 
+func TestEachResultIsTimedOnItsOwn(t *testing.T) {
+	s := newTestSession(t)
+	p := s.Run("select pg_sleep(0.3); select 1")
+	if !p.Ended || p.Elapsed < 300*time.Millisecond {
+		t.Fatalf("first = %+v", p)
+	}
+	p, err := s.More(p.QueryID)
+	if err != nil || !p.Done || p.Elapsed >= 300*time.Millisecond {
+		t.Fatalf("second = %+v, %v", p, err)
+	}
+}
+
+// A timer that fired just as More stopped it mustn't end the query More served.
+func TestLateTimerIsIgnored(t *testing.T) {
+	s := newTestSession(t)
+	p := s.Run("select g from generate_series(1, 2000) g")
+	q := s.q
+	late := q.armed
+	if _, err := s.More(p.QueryID); err != nil {
+		t.Fatal(err)
+	}
+	s.expire(q, late)
+	if p, err := s.More(p.QueryID); err != nil || p.Err != nil || len(p.Rows) != PageSize {
+		t.Fatalf("page = %+v, err = %v", p, err)
+	}
+}
+
 func TestUnreadResultExpires(t *testing.T) {
 	s := newTestSession(t)
 	s.idle = 100 * time.Millisecond
