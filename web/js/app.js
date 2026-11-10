@@ -319,9 +319,6 @@ function formatSQL() {
 	}
 }
 
-// History moved to the server. What's left from before is just taking up room.
-localStorage.removeItem("history");
-
 // Opens a dialog with nothing focused. Left alone, the browser focuses its first
 // link or button, and draws a focus ring round it that looks like a selection.
 function showUnfocused(dialog) {

@@ -117,7 +117,7 @@ func Restore(ctx context.Context, t Target, backup, database string, progress fu
 func dropCreated(admin *pgconn.PgConn, database string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	if _, err := rows(ctx, admin, "select pg_terminate_backend(pid) from pg_stat_activity where datname = $1", database); err != nil {
+	if err := disconnectAll(ctx, admin, database); err != nil {
 		return err
 	}
 	return execute(ctx, admin, "drop database "+quoteName(database))
@@ -133,15 +133,9 @@ func fill(ctx context.Context, t Target, image, backup, database string, keepOwn
 	defer f.Close()
 
 	progress("Restoring " + filepath.Base(backup))
-	env := []string{
-		"PGHOST=" + containerHost(t.Settings.Host),
-		"PGPORT=" + strconv.Itoa(int(t.Settings.Port)),
-		"PGUSER=" + t.Settings.User,
-		"PGPASSWORD=" + t.Settings.Password,
-	}
-	args := []string{"run", "--rm", "--init", "--interactive",
-		"-e", "PGHOST", "-e", "PGPORT", "-e", "PGUSER", "-e", "PGPASSWORD",
-		image, "pg_restore", "--verbose", "--dbname=" + database}
+	env, pass := pgEnv(t.Settings) // --dbname wins over its PGDATABASE
+	args := append(append([]string{"run", "--rm", "--init", "--interactive"}, pass...),
+		image, "pg_restore", "--verbose", "--dbname="+database)
 	if !keepOwners {
 		args = append(args, "--no-owner", "--no-privileges")
 	}

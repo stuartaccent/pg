@@ -21,7 +21,7 @@ type Check struct {
 	// much on a server that has been in use since they began.
 	Usage   bool
 	SQL     string
-	Columns []string   // only when there are rows
+	Columns []string   // what the check returns, even with no rows
 	Rows    [][]string // NULL comes through as ""
 	Err     error
 }

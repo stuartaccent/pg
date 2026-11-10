@@ -44,6 +44,13 @@ func rows(ctx context.Context, c *pgconn.PgConn, sql string, params ...string) (
 	return res.Rows, res.Err
 }
 
+// disconnectAll ends every connection to database, as renaming or dropping one
+// needs it to have none.
+func disconnectAll(ctx context.Context, c *pgconn.PgConn, database string) error {
+	_, err := rows(ctx, c, "select pg_terminate_backend(pid) from pg_stat_activity where datname = $1", database)
+	return err
+}
+
 func execute(ctx context.Context, c *pgconn.PgConn, sql string) error {
 	_, err := c.Exec(ctx, sql).ReadAll()
 	return err
@@ -188,7 +195,7 @@ func swap(admin *pgconn.PgConn, database, temp, old string) (swapped bool, err e
 	if err := allow(database, false); err != nil {
 		return false, err
 	}
-	if _, err := rows(ctx, admin, "select pg_terminate_backend(pid) from pg_stat_activity where datname = $1", database); err != nil {
+	if err := disconnectAll(ctx, admin, database); err != nil {
 		return false, errors.Join(err, allow(database, true))
 	}
 	if err := execute(ctx, admin, "alter database "+quoteName(database)+" rename to "+quoteName(old)); err != nil {

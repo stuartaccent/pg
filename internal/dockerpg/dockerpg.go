@@ -145,29 +145,39 @@ func containerHost(host string) string {
 	return host
 }
 
-// Backup dumps a database to dest in pg_dump's custom format, without its rows
-// if schemaOnly. The connection
-// details go through the environment, so the password stays out of the process
-// list. It's written beside dest and moved there when complete, so a backup
-// that exists is a backup that finished.
+// pgEnv is how a container's Postgres tools reach s: libpq's variables, and
+// docker's flags to pass them on. They go through the environment rather than
+// the arguments, so the password stays out of the process list.
 //
-// shortcut: sslmode isn't passed on, so pg_dump uses its default of prefer. Add
-// it if a service ever needs verify-full.
+// shortcut: sslmode isn't passed on, so the tools use their default of prefer.
+// Add it if a service ever needs verify-full.
+func pgEnv(s conn.Settings) (env, pass []string) {
+	env = []string{
+		"PGHOST=" + containerHost(s.Host),
+		"PGPORT=" + strconv.Itoa(int(s.Port)),
+		"PGUSER=" + s.User,
+		"PGPASSWORD=" + s.Password,
+		"PGDATABASE=" + s.Database,
+	}
+	for _, v := range env {
+		name, _, _ := strings.Cut(v, "=")
+		pass = append(pass, "-e", name)
+	}
+	return env, pass
+}
+
+// Backup dumps a database to dest in pg_dump's custom format, without its rows
+// if schemaOnly. It's written beside dest and moved there when complete, so a
+// backup that exists is a backup that finished.
 func Backup(ctx context.Context, s conn.Settings, image, dest string, schemaOnly bool, progress func(string)) error {
 	partial := dest + ".partial"
 	f, err := os.OpenFile(partial, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
 	}
-	cmd := command(ctx, []string{
-		"PGHOST=" + containerHost(s.Host),
-		"PGPORT=" + strconv.Itoa(int(s.Port)),
-		"PGUSER=" + s.User,
-		"PGPASSWORD=" + s.Password,
-		"PGDATABASE=" + s.Database,
-	}, "run", "--rm", "--init",
-		"-e", "PGHOST", "-e", "PGPORT", "-e", "PGUSER", "-e", "PGPASSWORD", "-e", "PGDATABASE",
-		image, "pg_dump", "--format=custom", "--verbose")
+	env, pass := pgEnv(s)
+	cmd := command(ctx, env, append(append([]string{"run", "--rm", "--init"}, pass...),
+		image, "pg_dump", "--format=custom", "--verbose")...)
 	if schemaOnly {
 		cmd.Args = append(cmd.Args, "--schema-only")
 	}
@@ -201,8 +211,8 @@ func PsqlCommand(s conn.Settings, image, dir string) (cmd, envFile string, err e
 	if err != nil {
 		return "", "", err
 	}
-	_, err = fmt.Fprintf(f, "PGHOST=%s\nPGPORT=%d\nPGUSER=%s\nPGPASSWORD=%s\nPGDATABASE=%s\n",
-		containerHost(s.Host), s.Port, s.User, s.Password, s.Database)
+	env, _ := pgEnv(s)
+	_, err = f.WriteString(strings.Join(env, "\n") + "\n")
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}

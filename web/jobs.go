@@ -281,7 +281,7 @@ func (s *Server) backup(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// schemaSuffix ends the name of a backup without rows, so the Backups dialog
+// schemaSuffix ends the name of a backup without rows, so the Backups tab
 // can leave out Replace. Replace checks the file itself as well.
 const schemaSuffix = "-schema.backup"
 

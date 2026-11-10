@@ -1233,13 +1233,17 @@ func TestWhatTheWarningsDependOn(t *testing.T) {
 
 func TestNewBackupFile(t *testing.T) {
 	modified := time.Date(2025, 3, 1, 9, 0, 0, 0, time.Local)
+	// Made by BackupName, as saveBackup does, so a change there shows here.
+	at := time.Date(2026, 11, 6, 12, 19, 21, 0, time.Local)
+	full := dockerpg.BackupName("shop-db-next", "postgres:17", at)
+	schema := strings.TrimSuffix(dockerpg.BackupName("shop_db_next", "postgres:18", at), ".backup") + schemaSuffix
 	for _, tt := range []struct {
 		name, database, version string
 		schema                  bool
 		taken                   time.Time
 	}{
-		{"shop-db-next-pg17-20261106-121921.backup", "shop-db-next", "pg17", false, time.Date(2026, 11, 6, 12, 19, 21, 0, time.Local)},
-		{"shop_db_next-pg18-20261108-160642-schema.backup", "shop_db_next", "pg18", true, time.Date(2026, 11, 8, 16, 6, 42, 0, time.Local)},
+		{full, "shop-db-next", "pg17", false, at},
+		{schema, "shop_db_next", "pg18", true, at},
 		{"other_app.backup", "other_app", "", false, modified},
 		{"x-pg18-2026-schema.backup", "x-pg18-2026-schema", "", false, modified},
 	} {

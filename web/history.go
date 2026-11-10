@@ -45,7 +45,7 @@ func historyFilter(r *http.Request) history.Filter {
 	}
 }
 
-// showHistory is the dialog's body: its filters and every entry.
+// showHistory is the History tab's body: its filters and every entry.
 func (s *Server) showHistory(w http.ResponseWriter, r *http.Request) {
 	var entries []history.Entry
 	var services []string
@@ -59,7 +59,7 @@ func (s *Server) showHistory(w http.ResponseWriter, r *http.Request) {
 	render(w, r, HistoryBody(services, entries, err))
 }
 
-// listHistory is the entries that match the dialog's filters.
+// listHistory is the entries that match the History tab's filters.
 func (s *Server) listHistory(w http.ResponseWriter, r *http.Request) {
 	f := historyFilter(r)
 	var entries []history.Entry
@@ -85,7 +85,7 @@ func (s *Server) historyDetail(w http.ResponseWriter, r *http.Request) {
 }
 
 // changeHistory runs change on the entry in the path. With refresh it tells the
-// dialog to show the change, which a note needn't: it's already on screen.
+// tab to show the change, which a note needn't: it's already on screen.
 func (s *Server) changeHistory(w http.ResponseWriter, r *http.Request, refresh bool, change func(context.Context, *history.Store, int64) error) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {

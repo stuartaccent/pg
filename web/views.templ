@@ -291,7 +291,7 @@ templ toolTab(id, label, icon string) {
 	</span>
 }
 
-// tabButtonOf is a tab with any label and icon, for Activity as well as queries.
+// tabButtonOf is a tab with any label and icon, for the tools as well as queries.
 templ tabButtonOf(id, label, icon string) {
 	<span class="group relative flex h-full shrink-0 items-center gap-1.5 border-r border-base-content/10 pl-3 pr-1 text-base-content/60 [&.tab-active]:bg-base-100 [&.tab-active]:text-base-content [&:not(.tab-active)]:hover:bg-base-300/50" data-tab-button={ id }>
 		<span aria-hidden="true" class="invisible absolute inset-x-0 top-0 h-0.5 bg-primary group-[.tab-active]:visible"></span>
@@ -322,7 +322,7 @@ templ tabPanel(id string) {
 				<li><button type="submit" form={ "editor-" + id } name="explain" value="analyze" onclick="this.closest('[popover]').hidePopover()"><i data-lucide="gauge" class="size-4"></i>Explain analyze</button></li>
 			</ul>
 			<!-- Dim until something runs, then red. -->
-			<button type="button" class="btn btn-ghost btn-sm gap-1.5 text-base-content/40 group-has-[.htmx-indicator.htmx-request]/tab:text-error" hx-post="/cancel" hx-vals={ fmt.Sprintf(`{"tab":%q}`, id) } hx-swap="none" title="Stop the running query">
+			<button type="button" class="btn btn-ghost btn-sm gap-1.5 text-base-content/40 group-has-[.htmx-indicator.htmx-request]/tab:text-error" hx-post="/cancel" hx-vals={ hxVals("tab", id) } hx-swap="none" title="Stop the running query">
 				<i data-lucide="square" class="size-3.5"></i>
 				Stop
 			</button>
@@ -357,7 +357,7 @@ templ tabPanel(id string) {
 			</span>
 			<!-- Two steps, as the Save dialog can stay open a while and that isn't
 			     running anything: Running… only belongs to the second. -->
-			<button id={ "export-" + id } type="button" class="btn btn-ghost btn-xs ml-auto gap-1.5" hx-post="/export/choose" hx-vals={ fmt.Sprintf(`{"tab":%q}`, id) } hx-target="#notice"><i data-lucide="download" class="size-3.5"></i>Export CSV</button>
+			<button id={ "export-" + id } type="button" class="btn btn-ghost btn-xs ml-auto gap-1.5" hx-post="/export/choose" hx-vals={ hxVals("tab", id) } hx-target="#notice"><i data-lucide="download" class="size-3.5"></i>Export CSV</button>
 			<span class="hidden" hx-post="/export" hx-trigger={ "export-ready from:#export-" + id } hx-include={ "#editor-" + id } hx-target="#notice" hx-indicator={ "#running-" + id }></span>
 		</div>
 		<main id={ "results-" + id } class="results flex-1 min-h-0 overflow-auto bg-base-100 select-text"></main>
