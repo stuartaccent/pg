@@ -118,11 +118,34 @@ func writesEveryRow(sql string) bool {
 
 // anyWithoutWhere walks a parse tree, as JSON, for an UpdateStmt or DeleteStmt
 // with no whereClause. Walking the JSON saves a case for every node type.
+// mergesEveryRow is true of a merge joined on plain true, matching every row,
+// that updates or deletes them with no further condition.
+func mergesEveryRow(stmt map[string]any) bool {
+	on, _ := stmt["joinCondition"].(map[string]any)
+	constant, _ := on["A_Const"].(map[string]any)
+	boolean, _ := constant["boolval"].(map[string]any)
+	if boolean["boolval"] != true {
+		return false
+	}
+	clauses, _ := stmt["mergeWhenClauses"].([]any)
+	for _, c := range clauses {
+		when, _ := c.(map[string]any)["MergeWhenClause"].(map[string]any)
+		command := when["commandType"]
+		if when["matchKind"] == "MERGE_WHEN_MATCHED" && when["condition"] == nil && (command == "CMD_UPDATE" || command == "CMD_DELETE") {
+			return true
+		}
+	}
+	return false
+}
+
 func anyWithoutWhere(node any) bool {
 	switch n := node.(type) {
 	case map[string]any:
 		for key, child := range n {
 			if stmt, ok := child.(map[string]any); ok && (key == "UpdateStmt" || key == "DeleteStmt") && stmt["whereClause"] == nil {
+				return true
+			}
+			if stmt, ok := child.(map[string]any); ok && key == "MergeStmt" && mergesEveryRow(stmt) {
 				return true
 			}
 			if anyWithoutWhere(child) {

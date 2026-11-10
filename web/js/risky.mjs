@@ -6,7 +6,7 @@ export function warningFor(mode, everyRow) {
 		return "Analyze really runs this query to time it. Changes are rolled back, but it takes as long as the query, and anything outside the transaction, such as sequences, stays changed.";
 	}
 	if (!mode && everyRow) {
-		return "This has an update or delete with no where clause, so it changes every row.";
+		return "This has an update or delete with no where clause, or a merge on true, so it changes every row.";
 	}
 	return "";
 }

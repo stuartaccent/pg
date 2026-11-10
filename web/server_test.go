@@ -1291,8 +1291,13 @@ func TestWritesEveryRow(t *testing.T) {
 		"with x as (select 1) delete from t",
 		"with recursive x as (select 1 where true) update t set a = 1",
 		"with x as (delete from t returning *) select * from x",
+		"merge into t using s on true when matched then delete",
+		"merge into t using s on true when matched then update set a = 1",
 	}
 	safe := []string{
+		"merge into t using s on t.id = s.id when matched then delete",
+		"merge into t using s on true when matched and s.gone then delete",
+		"merge into t using s on true when not matched then insert values (1)",
 		"",
 		"select 1",
 		"select * from t for update",

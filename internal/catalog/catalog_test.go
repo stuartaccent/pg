@@ -357,9 +357,21 @@ func TestClosedCatalogDoesNotReconnect(t *testing.T) {
 
 func TestCompletions(t *testing.T) {
 	c := newTestCatalog(t)
+	// Temp tables aren't offered, so this one only exists until the rollback.
+	for _, sql := range []string{"begin", `create table pg_test_quoting ("user" int, "Mixed" int, plain int)`} {
+		if _, err := c.read(context.Background(), sql, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
 	got, err := c.Completions(context.Background())
+	if _, rerr := c.read(context.Background(), "rollback", nil); rerr != nil {
+		t.Fatal(rerr)
+	}
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !slices.Contains(got.Quote, "user") || !slices.Contains(got.Quote, "Mixed") || slices.Contains(got.Quote, "plain") {
+		t.Errorf("quote = %v", got.Quote)
 	}
 	if len(got.Schemas) > 0 && got.DefaultSchema == "" {
 		t.Errorf("no default schema: %+v", got.DefaultSchema)

@@ -525,12 +525,16 @@ func (c *Catalog) Definition(ctx context.Context, def, id string) (string, error
 type Completions struct {
 	DefaultSchema string                         `json:"defaultSchema"` // where unqualified names resolve; empty if nowhere
 	Schemas       map[string]map[string][]string `json:"schemas"`       // columns by schema and table
+	// Quote lists the column names that need quotes, as Postgres decides: not
+	// just odd characters but reserved words, such as user, which bare would
+	// mean current_user.
+	Quote []string `json:"quote"`
 }
 
 // Completions returns the columns of every table and view.
 func (c *Catalog) Completions(ctx context.Context) (Completions, error) {
 	rows, err := c.read(ctx, `
-		select n.nspname, c.relname, a.attname, current_schema()
+		select n.nspname, c.relname, a.attname, current_schema(), (quote_ident(a.attname) <> a.attname)::text
 		from pg_class c
 		join pg_namespace n on n.oid = c.relnamespace
 		join pg_attribute a on a.attrelid = c.oid
@@ -539,8 +543,13 @@ func (c *Catalog) Completions(ctx context.Context) (Completions, error) {
 	if err != nil {
 		return Completions{}, err
 	}
-	done := Completions{Schemas: map[string]map[string][]string{}}
+	done := Completions{Schemas: map[string]map[string][]string{}, Quote: []string{}}
+	quoted := map[string]bool{}
 	for _, r := range rows {
+		if string(r[4]) == "true" && !quoted[string(r[2])] {
+			quoted[string(r[2])] = true
+			done.Quote = append(done.Quote, string(r[2]))
+		}
 		schema, table := string(r[0]), string(r[1])
 		if done.Schemas[schema] == nil {
 			done.Schemas[schema] = map[string][]string{}
