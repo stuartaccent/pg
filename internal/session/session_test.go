@@ -390,6 +390,21 @@ func TestLosingATransactionIsReported(t *testing.T) {
 	}
 }
 
+// Cancelling while a run checks the connection mustn't close it, and with it
+// the open transaction. It's a race, so it's tried a few times.
+func TestCancelDuringTheCheckKeepsTheTransaction(t *testing.T) {
+	s := newTestSession(t)
+	if p := s.Run("begin"); p.Err != nil {
+		t.Fatal(p.Err)
+	}
+	for range 40 {
+		go s.Cancel()
+		if p := s.Run("select 1"); errors.Is(p.Err, ErrTransactionLost) {
+			t.Fatal("lost the transaction")
+		}
+	}
+}
+
 func TestEachResultIsTimedOnItsOwn(t *testing.T) {
 	s := newTestSession(t)
 	p := s.Run("select pg_sleep(0.3); select 1")

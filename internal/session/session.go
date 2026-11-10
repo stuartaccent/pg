@@ -236,6 +236,11 @@ func (s *Session) begin() (context.Context, *query, error) {
 		return ctx, q, ErrClosed
 	}
 	if s.conn != nil && !conn.Alive(ctx, s.conn) {
+		// Cancelled while checking, by Cancel or a newer Run: that says nothing
+		// about the connection, and closing it would lose any transaction.
+		if err := ctx.Err(); err != nil {
+			return ctx, q, err
+		}
 		inTransaction := s.conn.TxStatus() != 'I'
 		_ = s.conn.Close(ctx)
 		s.conn = nil
