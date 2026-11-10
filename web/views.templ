@@ -1,6 +1,7 @@
 package web
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -413,7 +414,7 @@ templ JobStatus(j jobView) {
 			} else {
 				<span class="truncate text-success" title={ j.Result.Text }>{ j.Result.Text }</span>
 				if j.Result.Connect != "" {
-					<button type="button" class="btn btn-soft btn-xs shrink-0" hx-post="/connect" hx-vals={ fmt.Sprintf(`{"service":%q}`, j.Result.Connect) } hx-target="#status">Connect</button>
+					<button type="button" class="btn btn-soft btn-xs shrink-0" hx-post="/connect" hx-vals={ hxVals("service", j.Result.Connect) } hx-target="#status">Connect</button>
 				}
 			}
 			<button type="button" class="btn btn-ghost btn-xs shrink-0" aria-label="Dismiss" onclick="this.parentElement.remove()">✕</button>
@@ -477,7 +478,7 @@ templ BackupsBody(service, database string, canRestore bool, dir string, files [
 							<td class="text-xs whitespace-nowrap">{ f.Taken() }</td>
 							<td class="text-xs text-right whitespace-nowrap text-base-content/60">{ f.Size }</td>
 							<td class="text-right whitespace-nowrap">
-								<button type="button" class="btn btn-soft btn-xs" hx-post="/sandboxes" hx-vals={ fileValues(f.Name) } hx-target="#job">Sandbox</button>
+								<button type="button" class="btn btn-soft btn-xs" hx-post="/sandboxes" hx-vals={ hxVals("file", f.Name) } hx-target="#job">Sandbox</button>
 								@backupMenu(fmt.Sprintf("backup-menu-%d", i), f, service, database, canRestore)
 							</td>
 						</tr>
@@ -558,14 +559,14 @@ templ connectField(name, value string) {
 templ backupMenu(id string, f backupFile, service, database string, canRestore bool) {
 	<button type="button" class="btn btn-ghost btn-xs" popovertarget={ id } style={ templ.SafeCSS("anchor-name:--" + id) } aria-label={ "More for " + f.Name }>⋯</button>
 	<ul popover id={ id } style={ templ.SafeCSS("position-anchor:--" + id) } class="dropdown dropdown-end menu w-36 rounded-box bg-base-200 shadow-md text-left">
-		<li><button type="button" hx-post="/backups/verify" hx-vals={ fileValues(f.Name) } hx-target="#job" onclick="this.closest('[popover]').hidePopover()">Verify</button></li>
+		<li><button type="button" hx-post="/backups/verify" hx-vals={ hxVals("file", f.Name) } hx-target="#job" onclick="this.closest('[popover]').hidePopover()">Verify</button></li>
 		if canRestore {
 			<li><button type="button" data-file={ f.Name } data-name={ dockerpg.RestoreName(f.Name, time.Now()) } data-service={ service } onclick="this.closest('[popover]').hidePopover(); showRestore(this)">Restore</button></li>
 			if database != "" && !f.Schema {
 				<li><button type="button" class="text-warning" data-file={ f.Name } data-database={ database } data-other={ fmt.Sprint(!dockerpg.SameDatabase(f.Name, database)) } onclick="this.closest('[popover]').hidePopover(); showReplace(this)">Replace</button></li>
 			}
 		}
-		<li><button type="button" class="text-error" hx-post="/backups/delete" hx-vals={ fileValues(f.Name) } hx-target="#backups-body" data-confirm={ "Delete " + f.Name + " for good? It won't go to the Trash." } onclick="this.closest('[popover]').hidePopover()">Delete</button></li>
+		<li><button type="button" class="text-error" hx-post="/backups/delete" hx-vals={ hxVals("file", f.Name) } hx-target="#backups-body" data-confirm={ "Delete " + f.Name + " for good? It won't go to the Trash." } onclick="this.closest('[popover]').hidePopover()">Delete</button></li>
 	</ul>
 }
 
@@ -803,9 +804,11 @@ templ treeLabel(n catalog.Node) {
 	</span>
 }
 
-// fileValues is the hx-vals naming a backup.
-func fileValues(name string) string {
-	return fmt.Sprintf(`{"file":%q}`, name)
+// hxVals is an hx-vals of one value. It's JSON, which Go's %q quoting isn't
+// for every name, as a file in the backups folder can have.
+func hxVals(key, value string) string {
+	b, _ := json.Marshal(map[string]string{key: value}) // a map of strings always marshals
+	return string(b)
 }
 
 // nodeIcon is the Lucide icon for a tree node: by what it opens to, or for a

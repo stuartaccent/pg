@@ -1359,3 +1359,11 @@ func TestHistoryTab(t *testing.T) {
 		t.Errorf("after remove: %s", body)
 	}
 }
+
+func TestHxValsIsJSON(t *testing.T) {
+	name := "odd\x01\"name .backup"
+	var got map[string]string
+	if err := json.Unmarshal([]byte(hxVals("file", name)), &got); err != nil || got["file"] != name {
+		t.Errorf("got %v, %v", got, err)
+	}
+}

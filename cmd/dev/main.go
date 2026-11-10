@@ -12,10 +12,12 @@ import (
 const addr = "127.0.0.1:8080"
 
 // localOnly refuses other Host headers. A site can point its own domain at this
-// machine, which makes it look same-origin to the check above.
+// machine, which makes it look same-origin to the check above. It also refuses
+// any request another site's page makes, even a GET: loading / starts over,
+// closing every tab's session.
 func localOnly(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Host != addr && r.Host != "localhost:8080" {
+		if r.Host != addr && r.Host != "localhost:8080" || r.Header.Get("Sec-Fetch-Site") == "cross-site" {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
