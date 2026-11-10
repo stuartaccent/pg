@@ -124,8 +124,12 @@ func Replace(ctx context.Context, t Target, backup, database string, at time.Tim
 
 	progress("Swapping")
 	old := oldName(database, at)
-	if err := swap(admin, database, temp, old); err != nil {
+	if swapped, err := swap(admin, database, temp, old); !swapped {
 		return fail(err)
+	} else if err != nil {
+		// temp is the live database now, so there's nothing to remove.
+		return report, old, fmt.Errorf("replaced %s, but the previous one, %s, still refuses connections (alter database %s allow_connections true): %w",
+			database, old, quoteName(old), err)
 	}
 	return report, old, nil
 }
@@ -173,26 +177,28 @@ func copyDatabaseSettings(ctx context.Context, admin *pgconn.PgConn, database, t
 // swap renames database to old and temp to database, closing connections to it
 // first. Refusing new ones stops an application reconnecting in the gap. It
 // isn't tied to the job's context: once started it has to finish or undo.
-func swap(admin *pgconn.PgConn, database, temp, old string) error {
+// swapped is true once the renames are done, even if letting old take
+// connections again then fails.
+func swap(admin *pgconn.PgConn, database, temp, old string) (swapped bool, err error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	allow := func(name string, allowed bool) error {
 		return execute(ctx, admin, fmt.Sprintf("alter database %s allow_connections %t", quoteName(name), allowed))
 	}
 	if err := allow(database, false); err != nil {
-		return err
+		return false, err
 	}
 	if _, err := rows(ctx, admin, "select pg_terminate_backend(pid) from pg_stat_activity where datname = $1", database); err != nil {
-		return errors.Join(err, allow(database, true))
+		return false, errors.Join(err, allow(database, true))
 	}
 	if err := execute(ctx, admin, "alter database "+quoteName(database)+" rename to "+quoteName(old)); err != nil {
-		return errors.Join(err, allow(database, true))
+		return false, errors.Join(err, allow(database, true))
 	}
 	if err := execute(ctx, admin, "alter database "+quoteName(temp)+" rename to "+quoteName(database)); err != nil {
 		undo := execute(ctx, admin, "alter database "+quoteName(old)+" rename to "+quoteName(database))
-		return errors.Join(err, undo, allow(database, true))
+		return false, errors.Join(err, undo, allow(database, true))
 	}
-	return allow(old, true)
+	return true, allow(old, true)
 }
 
 // CanReplace reports why database can't be replaced, or "" if it can.
