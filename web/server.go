@@ -47,6 +47,7 @@ type Server struct {
 
 	mu       sync.Mutex
 	service  string                                        // guarded by mu
+	base     string                                        // guarded by mu; service without any /database
 	readOnly bool                                          // guarded by mu
 	dsn      string                                        // guarded by mu
 	settings conn.Settings                                 // guarded by mu
@@ -155,7 +156,7 @@ func (s *Server) disconnect() {
 	s.mu.Lock()
 	sessions, cat := s.sessions, s.cat
 	s.sessions, s.cat, s.connect, s.service, s.readOnly = map[string]*session.Session{}, nil, nil, "", false
-	s.dsn, s.settings, s.image = "", conn.Settings{}, ""
+	s.dsn, s.settings, s.image, s.base = "", conn.Settings{}, "", ""
 	s.mu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -215,10 +216,10 @@ func (s *Server) connectService(w http.ResponseWriter, r *http.Request) {
 	services, sandboxes, err := serviceList(r.Context())
 	// service/database reaches another database on a service's server, for
 	// connecting to one that's just been restored. A service can have a slash in
-	// its own name, so that comes first.
+	// its own name, so that comes first; a database name never has one.
 	base, database := service, ""
-	if !slices.Contains(services, service) {
-		base, database, _ = strings.Cut(service, "/")
+	if i := strings.LastIndex(service, "/"); i >= 0 && !slices.Contains(services, service) {
+		base, database = service[:i], service[i+1:]
 	}
 	if err == nil && !slices.Contains(services, base) {
 		err = errors.New("unknown service " + strconv.Quote(base))
@@ -258,7 +259,7 @@ func (s *Server) connectService(w http.ResponseWriter, r *http.Request) {
 	}
 	s.disconnect()
 	s.mu.Lock()
-	s.service, s.readOnly, s.connect, s.dsn, s.settings, s.image = service, readOnly, connect, dsn, settings, image
+	s.service, s.base, s.readOnly, s.connect, s.dsn, s.settings, s.image = service, base, readOnly, connect, dsn, settings, image
 	s.cat = catalog.New(connect)
 	s.mu.Unlock()
 	w.Header().Set("HX-Trigger", "connected, services-changed") // reloads the tree and the dropdown

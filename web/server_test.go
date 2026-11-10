@@ -1161,14 +1161,12 @@ func TestSlashesInConnections(t *testing.T) {
 	if err := os.WriteFile(file, []byte("[team/app]\nhost=localhost\nport=1\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	// Both reach the connection attempt, which fails on the port, not the name.
-	for _, service := range []string{"team/app", "team/app/other"} {
+	// The service, and a database on it, reach the connection attempt, which
+	// fails on the port, not the name.
+	for service, known := range map[string]bool{"team/app": true, "team/app/other": true, "team/other": false} {
 		body := postConnect(New(), service).Body.String()
-		if service == "team/app" && strings.Contains(body, "unknown service") {
-			t.Errorf("%s: %q", service, body)
-		}
-		if service != "team/app" && !strings.Contains(body, "unknown service") {
-			t.Errorf("%s: want unknown service: %q", service, body)
+		if got := !strings.Contains(body, "unknown service"); got != known {
+			t.Errorf("%s: known = %v: %q", service, got, body)
 		}
 	}
 }

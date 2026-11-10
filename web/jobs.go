@@ -370,11 +370,11 @@ func (s *Server) verifyBackup(w http.ResponseWriter, r *http.Request) {
 }
 
 // writableTarget returns a backup's path, and the connected server to write it
-// to, if that's allowed.
+// to, if that's allowed, with the service it's from.
 func (s *Server) writableTarget(name string) (string, string, dockerpg.Target, error) {
 	path, err := backupPath(name)
 	s.mu.Lock()
-	service, readOnly := s.service, s.readOnly
+	service, base, readOnly := s.service, s.base, s.readOnly
 	target := dockerpg.Target{DSN: s.dsn, Settings: s.settings, Image: s.image}
 	s.mu.Unlock()
 	switch {
@@ -384,12 +384,12 @@ func (s *Server) writableTarget(name string) (string, string, dockerpg.Target, e
 	case readOnly:
 		err = errors.New(service + " is read-only")
 	}
-	return path, service, target, err
+	return path, base, target, err
 }
 
 func (s *Server) restoreBackup(w http.ResponseWriter, r *http.Request) {
 	database := r.FormValue("database")
-	path, service, target, err := s.writableTarget(r.FormValue("file"))
+	path, base, target, err := s.writableTarget(r.FormValue("file"))
 	if err == nil && !dockerpg.ValidDatabase(database) {
 		err = errors.New("not a usable database name: " + database)
 	}
@@ -397,8 +397,6 @@ func (s *Server) restoreBackup(w http.ResponseWriter, r *http.Request) {
 		render(w, r, JobStatus(jobView{Label: "Restore", Err: err}))
 		return
 	}
-	// The part before any slash, so connecting works from a restored database too.
-	base, _, _ := strings.Cut(service, "/")
 	s.startAndRender(w, r, "Restoring to "+database, func(ctx context.Context, progress func(string)) (jobResult, error) {
 		report, err := dockerpg.Restore(ctx, target, path, database, progress)
 		if err != nil {
@@ -481,9 +479,7 @@ func (s *Server) removeSandbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.mu.Lock()
-	// Any database inside it counts too.
-	base, _, _ := strings.Cut(s.service, "/")
-	connected := base == name
+	connected := s.base == name // any database inside it counts too
 	s.mu.Unlock()
 	if connected {
 		s.disconnect()
