@@ -199,34 +199,18 @@ func Backup(ctx context.Context, s conn.Settings, image, dest string, schemaOnly
 	return os.Rename(partial, dest)
 }
 
-// PsqlCommand returns a shell command that runs psql from image, interactively,
-// on s. It starts in dir, mounted read-only at /queries, so \i runs the files
-// there by their paths in dir. The connection details go in envFile, which
-// only the user can read, so the password isn't on screen or in the shell's
-// history. The command deletes it when psql exits, but docker only needs it
-// to start, so the caller should delete it too, once the command has had time
-// to begin or if it never ran.
-func PsqlCommand(s conn.Settings, image, dir string) (cmd, envFile string, err error) {
-	f, err := os.CreateTemp("", "pg-psql-*.env")
-	if err != nil {
-		return "", "", err
+// Psql prepares psql from image, interactively, on s. It needs a terminal for
+// its stdin and stdout. It starts in dir, mounted read-only at /queries, so \i
+// runs the files there by their paths in dir. The connection details go in
+// docker's environment, so the password isn't in its arguments. If readOnly,
+// transactions default to read-only, as a read-only service's query tabs do.
+func Psql(ctx context.Context, s conn.Settings, readOnly bool, image, dir string) *exec.Cmd {
+	env, pass := pgEnv(s)
+	if readOnly {
+		env, pass = append(env, "PGOPTIONS=-c default_transaction_read_only=on"), append(pass, "-e", "PGOPTIONS")
 	}
-	env, _ := pgEnv(s)
-	_, err = f.WriteString(strings.Join(env, "\n") + "\n")
-	if cerr := f.Close(); err == nil {
-		err = cerr
-	}
-	if err != nil {
-		_ = os.Remove(f.Name())
-		return "", "", err
-	}
-	return fmt.Sprintf("%s run --rm -it --init --env-file %s -v %s -w /queries %s psql; rm -f %[2]s",
-		shellQuote(dockerPath()), shellQuote(f.Name()), shellQuote(dir+":/queries:ro"), shellQuote(image)), f.Name(), nil
-}
-
-// shellQuote quotes v as one word for a POSIX shell.
-func shellQuote(v string) string {
-	return "'" + strings.ReplaceAll(v, "'", `'\''`) + "'"
+	return command(ctx, env, append(append([]string{"run", "--rm", "-it", "--init"}, pass...),
+		"-v", dir+":/queries:ro", "-w", "/queries", image, "psql")...)
 }
 
 // Sandbox is a throwaway Postgres in a container, holding a restored backup.

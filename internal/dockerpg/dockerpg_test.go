@@ -846,29 +846,24 @@ func TestSandboxURL(t *testing.T) {
 	}
 }
 
-func TestPsqlCommand(t *testing.T) {
-	t.Setenv("TMPDIR", t.TempDir())
-	cmd, envFile, err := PsqlCommand(conn.Settings{Host: "localhost", Port: 5418, User: "postgres", Password: "it's", Database: "app"}, "postgres:18", "/Users/me/pg-queries")
-	if err != nil {
-		t.Fatal(err)
+func TestPsql(t *testing.T) {
+	settings := conn.Settings{Host: "localhost", Port: 5418, User: "postgres", Password: "it's", Database: "app"}
+	cmd := Psql(t.Context(), settings, false, "postgres:18", "/Users/me/pg-queries")
+	args := strings.Join(cmd.Args[1:], " ")
+	want := "run --rm -it --init -e PGHOST -e PGPORT -e PGUSER -e PGPASSWORD -e PGDATABASE -v /Users/me/pg-queries:/queries:ro -w /queries postgres:18 psql"
+	if args != want {
+		t.Errorf("args = %s\nwant %s", args, want)
 	}
-	if !strings.Contains(cmd, " -v '/Users/me/pg-queries:/queries:ro' -w /queries 'postgres:18' psql;") {
-		t.Errorf("queries not mounted: %s", cmd)
+	if !slices.Contains(cmd.Env, "PGPASSWORD=it's") || !slices.Contains(cmd.Env, "PGHOST=host.docker.internal") {
+		t.Errorf("env lacks the connection: %v", cmd.Env)
 	}
-	// The env file is the quoted word after --env-file, deleted at the end.
-	_, rest, _ := strings.Cut(cmd, "--env-file '")
-	path, _, _ := strings.Cut(rest, "'")
-	if path != envFile || !strings.HasSuffix(cmd, "psql; rm -f '"+path+"'") {
-		t.Errorf("cmd = %s", cmd)
+	if slices.Contains(cmd.Args, "PGOPTIONS") {
+		t.Errorf("writable service made read-only: %v", cmd.Args)
 	}
-	info, err := os.Stat(path)
-	if err != nil || info.Mode().Perm() != 0o600 {
-		t.Fatalf("env file: %v, %v", info, err)
-	}
-	b, _ := os.ReadFile(path)
-	want := "PGHOST=host.docker.internal\nPGPORT=5418\nPGUSER=postgres\nPGPASSWORD=it's\nPGDATABASE=app\n"
-	if string(b) != want {
-		t.Errorf("env file = %q", b)
+
+	cmd = Psql(t.Context(), settings, true, "postgres:18", "/Users/me/pg-queries")
+	if !strings.Contains(strings.Join(cmd.Args, " "), "-e PGDATABASE -e PGOPTIONS -v") || !slices.Contains(cmd.Env, "PGOPTIONS=-c default_transaction_read_only=on") {
+		t.Errorf("read-only service not passed on: %v, %v", cmd.Args, cmd.Env)
 	}
 }
 

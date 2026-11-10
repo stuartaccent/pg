@@ -7,6 +7,8 @@ import { Compartment, Prec } from "@codemirror/state";
 import { keymap, placeholder } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import { formatDialect, postgresql } from "sql-formatter";
+import { FitAddon } from "@xterm/addon-fit";
+import { Terminal } from "@xterm/xterm";
 import {
 	Activity, AlignLeft, Archive, Bookmark, Box, ChevronDown, Columns3, Copy, CopyX, Database, Download, Eye, FileCode, FileInput,
 	FilePen, Folder, FolderOpen, Gauge, Hash, HeartPulse, History, KeyRound, Languages, Layers, ListTree, Play, Plus, RefreshCw, Save,
@@ -115,7 +117,7 @@ function mount(panel) {
 }
 
 // The server tools, which open as tabs of their own beside the query tabs.
-const tools = ["activity", "health", "backups", "history"];
+const tools = ["activity", "health", "backups", "history", "psql"];
 
 // Selects a query tab or a tool. activeTab stays a query tab, as the
 // editor's commands act on it.
@@ -144,6 +146,7 @@ function openTool(tool) {
 
 async function closeTab(id) {
 	if (tools.includes(id)) {
+		if (id === "psql") endPsql();
 		document.querySelector(`#${id}-tab`).hidden = true;
 		if (toolShowing() === id) selectTab(activeTab);
 		return;
@@ -339,6 +342,83 @@ const showActivity = () => showTool("activity");
 // The checks can take a moment on a big database.
 const showHealth = () => showTool("health", "");
 const showHistory = () => showTool("history", "m-3").then(() => document.querySelector("#history-search")?.focus());
+
+// psql, in a terminal in its tab. Its output streams in one long response, as
+// the app's window can't do WebSockets, and keys and sizes go back as posts.
+let term, fit, psqlExited, typed = "", typing = false;
+
+async function showPsql() {
+	openTool("psql");
+	if (term) return term.focus();
+	const t = (term = new Terminal({ fontFamily: "ui-monospace, Menlo, monospace", fontSize: 12, theme: termTheme() }));
+	fit = new FitAddon();
+	t.loadAddon(fit);
+	t.open(document.querySelector("#psql-term"));
+	fit.fit();
+	t.onResize(({ cols, rows }) => fetch(`/psql/size?cols=${cols}&rows=${rows}`, { method: "POST" }));
+	t.onData((data) => {
+		if (!psqlExited) return type(data);
+		psqlExited = false;
+		runPsql(t);
+	});
+	t.focus();
+	await runPsql(t);
+}
+
+// Starts psql if it isn't running, and shows what it writes until it exits.
+async function runPsql(t) {
+	const res = await fetch("/psql", { method: "POST" });
+	if (res.status !== 204) {
+		document.querySelector("#status").innerHTML = await res.text();
+		return closeTab("psql");
+	}
+	fetch(`/psql/size?cols=${t.cols}&rows=${t.rows}`, { method: "POST" });
+	const reader = (await fetch("/psql/out")).body.getReader();
+	for (let chunk; !(chunk = await reader.read()).done; ) t.write(chunk.value);
+	if (t !== term) return; // its tab closed
+	t.write("\r\n[psql has exited: press a key to start it again]\r\n");
+	psqlExited = true;
+}
+
+// Sends keys one post at a time, so they arrive in order.
+async function type(data) {
+	typed += data;
+	if (typing) return;
+	typing = true;
+	while (typed) {
+		const body = typed;
+		typed = "";
+		await fetch("/psql/in", { method: "POST", body }).catch(() => {});
+	}
+	typing = false;
+}
+
+function endPsql() {
+	term?.dispose();
+	term = fit = undefined;
+	psqlExited = false;
+	fetch("/psql", { method: "DELETE" });
+}
+
+// xterm wants colours it can parse, and the theme's are oklch, so this reads
+// one back from a canvas as rgba.
+function themeColor(name, alpha = 1) {
+	const ctx = Object.assign(document.createElement("canvas"), { width: 1, height: 1 }).getContext("2d");
+	ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue(name);
+	ctx.fillRect(0, 0, 1, 1);
+	const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data;
+	return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+const termTheme = () => ({
+	background: themeColor("--color-base-100"),
+	foreground: themeColor("--color-base-content"),
+	cursor: themeColor("--color-base-content"),
+	selectionBackground: themeColor("--color-primary", 0.3),
+});
+new ResizeObserver(() => fit?.fit()).observe(document.querySelector("#psql-term"));
+const retheme = () => term && (term.options.theme = termTheme());
+new MutationObserver(retheme).observe(document.documentElement, { attributeFilter: ["data-theme"] });
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", retheme);
 
 // Shows a view in the sidebar: "tree", or "queries", which reloads its list
 // each time, as files can change in Finder meanwhile.
@@ -615,7 +695,7 @@ document.addEventListener("keydown", (event) => {
 	resize(bar, sizeOf(bar) + step);
 });
 
-Object.assign(window, { toolOpen, showSidebar, fromMenu, newTab, closeActiveTab, selectTab, closeTab, closeAllTabs, useSQL, useDefinition, resetTree, formatSQL, showHistory, chooseHistory, sortHistory, showQueries, useQuery, openQueryFile, saveQuery, showActivity, showHealth, activityLive, showBackups, showRestore, closeRestore, showReplace, checkReplace, closeReplace, copyCell, updateCell, copyPlan, copyFrom });
+Object.assign(window, { toolOpen, showSidebar, fromMenu, newTab, closeActiveTab, selectTab, closeTab, closeAllTabs, useSQL, useDefinition, resetTree, formatSQL, showHistory, chooseHistory, sortHistory, showQueries, useQuery, openQueryFile, saveQuery, showActivity, showHealth, showPsql, activityLive, showBackups, showRestore, closeRestore, showReplace, checkReplace, closeReplace, copyCell, updateCell, copyPlan, copyFrom });
 
 // Wails holds back the menu's commands until its runtime says the page is ready.
 // This page doesn't load that runtime, so it says so itself.

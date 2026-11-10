@@ -5,11 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -17,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/creack/pty"
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"pg/internal/catalog"
@@ -647,55 +650,60 @@ func TestEditConfig(t *testing.T) {
 	}
 }
 
-func TestOpenPsql(t *testing.T) {
-	tmp := t.TempDir()
-	t.Setenv("TMPDIR", tmp)
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	var scripts []string
-	var refuse error
-	real, life := openTerminal, envFileLife
-	openTerminal = func(script string) error {
-		scripts = append(scripts, script)
-		return refuse
+func TestPsql(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	// sh stands in for docker: it reads a line, then says what it got and its size.
+	var started []string
+	real := startPsql
+	startPsql = func(ctx context.Context, settings conn.Settings, readOnly bool, image, dir string) (*os.File, *exec.Cmd, error) {
+		started = append(started, fmt.Sprint(readOnly, " ", image, " ", dir))
+		cmd := exec.CommandContext(ctx, "sh", "-c", "read line; echo \"got:$line size:$(stty size)\"; [ \"$line\" = wait ] && sleep 30")
+		f, err := pty.Start(cmd)
+		return f, cmd, err
 	}
-	envFileLife = 50 * time.Millisecond
-	t.Cleanup(func() { openTerminal, envFileLife = real, life })
-	passwordFiles := func() int {
-		found, _ := filepath.Glob(filepath.Join(tmp, "pg-psql-*.env"))
-		return len(found)
-	}
+	t.Cleanup(func() { startPsql = real })
 
 	s := New()
-	if got := get(t, s, http.MethodPost, "/psql").Body.String(); !strings.Contains(got, "connect to a service first") || len(scripts) != 0 {
-		t.Errorf("unconnected: %q, %v", got, scripts)
+	if got := get(t, s, http.MethodPost, "/psql").Body.String(); !strings.Contains(got, "connect to a service first") || len(started) != 0 {
+		t.Errorf("unconnected: %q, %v", got, started)
 	}
-	s.dsn, s.settings, s.image = "service=x", conn.Settings{Host: "127.0.0.1", Port: 5418, User: "postgres"}, "postgres:18"
-	if got := get(t, s, http.MethodPost, "/psql").Code; got != http.StatusNoContent || len(scripts) != 1 {
-		t.Fatalf("status = %d, scripts = %v", got, scripts)
+	s.dsn, s.settings, s.image, s.readOnly = "service=x", conn.Settings{Host: "127.0.0.1", Port: 5418, User: "postgres"}, "postgres:18", true
+	for range 2 { // the second finds it running
+		if got := get(t, s, http.MethodPost, "/psql").Code; got != http.StatusNoContent {
+			t.Fatalf("status = %d", got)
+		}
 	}
-	if !strings.Contains(scripts[0], "-v '"+home+"/pg-queries:/queries:ro' -w /queries 'postgres:18' psql; rm -f ") {
-		t.Errorf("script = %s", scripts[0])
+	if len(started) != 1 || !strings.HasPrefix(started[0], "true ") || !strings.HasSuffix(started[0], "/pg-queries") {
+		t.Fatalf("started = %v", started)
 	}
-	// The password file goes once docker has had time to read it, whatever psql does.
-	if passwordFiles() != 1 {
-		t.Error("password file gone before docker could read it")
+	if got := get(t, s, http.MethodPost, "/psql/size?cols=x&rows=40").Code; got != http.StatusBadRequest {
+		t.Errorf("bad size status = %d", got)
 	}
-	time.Sleep(200 * time.Millisecond)
-	if passwordFiles() != 0 {
-		t.Error("password file left after docker had time to start")
+	get(t, s, http.MethodPost, "/psql/size?cols=100&rows=40")
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/psql/in", strings.NewReader("hello\n")))
+	// Returns once sh exits, having streamed all it wrote.
+	if got := get(t, s, http.MethodGet, "/psql/out").Body.String(); !strings.Contains(got, "got:hello size:40 100") {
+		t.Errorf("output = %q", got)
 	}
-	// And at once if Terminal never opened.
-	refuse = errors.New("not allowed to send Apple events to Terminal")
-	if got := get(t, s, http.MethodPost, "/psql").Body.String(); !strings.Contains(got, "not allowed") || passwordFiles() != 0 {
-		t.Errorf("refused: %q, %d password files", got, passwordFiles())
-	}
-}
 
-func TestTerminalScriptEscapes(t *testing.T) {
-	want := `do script "echo 'a\\b' \"c\""`
-	if got := terminalScript(`echo 'a\b' "c"`); !strings.Contains(got, want) {
-		t.Errorf("script = %s\nwant %s", got, want)
+	// Once it has exited, opening the tab starts another; closing pg stops it.
+	<-s.psql().done
+	get(t, s, http.MethodPost, "/psql")
+	if len(started) != 2 {
+		t.Fatalf("not restarted: %v", started)
+	}
+	w = httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/psql/in", strings.NewReader("wait\n")))
+	stopped := make(chan struct{})
+	go func() { s.Close(); close(stopped) }()
+	select {
+	case <-stopped:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close didn't stop psql")
+	}
+	if s.psql() != nil {
+		t.Error("psql still there after Close")
 	}
 }
 

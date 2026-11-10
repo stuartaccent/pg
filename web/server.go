@@ -55,6 +55,7 @@ type Server struct {
 	job      *job                                          // guarded by mu; the latest one
 	exportTo map[string]string                             // guarded by mu; where a tab's export was told to go
 	hist     *history.Store                                // guarded by mu; nil until first used
+	term     *psqlTerm                                     // guarded by mu; nil until the psql tab opens
 }
 
 func New() *Server {
@@ -70,6 +71,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /services", s.services)
 	mux.HandleFunc("POST /config/{file}", s.editConfig)
 	mux.HandleFunc("POST /psql", s.openPsql)
+	mux.HandleFunc("GET /psql/out", s.psqlOutput)
+	mux.HandleFunc("POST /psql/in", s.psqlInput)
+	mux.HandleFunc("POST /psql/size", s.psqlSize)
+	mux.HandleFunc("DELETE /psql", s.closePsql)
 	mux.HandleFunc("GET /backups", s.backups)
 	mux.HandleFunc("POST /backups/open", s.openBackups)
 	mux.HandleFunc("POST /backup", s.backup)
@@ -128,6 +133,9 @@ const jobCleanupTimeout = 20 * time.Second
 // waits for the job, which has things to remove: exiting under it would leave a
 // partial backup or a half-restored database behind, out of sight.
 func (s *Server) Close() {
+	if done := s.endPsql(); done != nil {
+		<-done // docker gives up within its WaitDelay, so this can't hang
+	}
 	s.mu.Lock()
 	j := s.job
 	s.mu.Unlock()

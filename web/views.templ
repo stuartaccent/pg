@@ -48,7 +48,7 @@ templ Index(services []string, current string, readOnly bool, j jobView, err err
 						<button type="button" class="btn btn-ghost btn-sm btn-square" aria-label="Backups" onclick="showBackups()"><i data-lucide="archive" class="size-4"></i></button>
 					</div>
 					<div class="tooltip tooltip-bottom" data-tip="psql">
-						<button type="button" class="btn btn-ghost btn-sm btn-square" aria-label="Open psql in Terminal" hx-post="/psql" hx-target="#status"><i data-lucide="square-terminal" class="size-4"></i></button>
+						<button type="button" class="btn btn-ghost btn-sm btn-square" aria-label="psql" onclick="showPsql()"><i data-lucide="square-terminal" class="size-4"></i></button>
 					</div>
 					<details class="dropdown dropdown-end">
 						<summary class="btn btn-ghost btn-sm btn-square" aria-label="Config" title="Config"><i data-lucide="settings" class="size-4"></i></summary>
@@ -118,6 +118,7 @@ templ Index(services []string, current string, readOnly bool, j jobView, err err
 							@toolTab("health", "Health", "heart-pulse")
 							@toolTab("backups", "Backups", "archive")
 							@toolTab("history", "History", "history")
+							@toolTab("psql", "psql", "square-terminal")
 						</div>
 						<button type="button" class="btn btn-square btn-ghost btn-xs mx-1 self-center" aria-label="New query tab" title="New tab (⌘T)" hx-post="/tabs" hx-target="#panels" hx-swap="beforeend"><i data-lucide="plus" class="size-3.5"></i></button>
 						<button type="button" class="btn btn-square btn-ghost btn-xs ml-auto mr-1 self-center" aria-label="Close all tabs" title="Close all tabs" onclick="closeAllTabs()"><i data-lucide="copy-x" class="size-3.5"></i></button>
@@ -144,6 +145,10 @@ templ Index(services []string, current string, readOnly bool, j jobView, err err
 						</section>
 						<section id="history-panel" data-tool-panel class="flex flex-1 min-w-0 min-h-0 flex-col bg-base-100" hidden>
 							<div id="history-body" class="flex flex-1 min-h-0 flex-col"></div>
+						</section>
+						<!-- xterm draws psql in here: see showPsql in app.js. -->
+						<section id="psql-panel" data-tool-panel class="flex flex-1 min-w-0 min-h-0 bg-base-100 p-2" hidden>
+							<div id="psql-term" class="flex-1 min-w-0 min-h-0"></div>
 						</section>
 					</div>
 				</div>

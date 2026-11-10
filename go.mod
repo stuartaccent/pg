@@ -4,6 +4,7 @@ go 1.26.0
 
 require (
 	github.com/a-h/templ v0.3.1100
+	github.com/creack/pty v1.1.24
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761
 	github.com/jackc/pgx/v5 v5.12.0
 	github.com/pganalyze/pg_query_go/v6 v6.2.5
