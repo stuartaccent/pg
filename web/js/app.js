@@ -38,7 +38,8 @@ const drawIcons = (root) =>
 
 const sqlLanguage = () => sql({ dialect: PostgreSQL, schema: completions.schemas ?? {}, defaultSchema: completions.defaultSchema || undefined });
 
-const quoteIfNeeded = (name) => (/^[a-z_][a-z0-9_$]*$/.test(name) ? name : `"${name.replaceAll('"', '""')}"`);
+// Which names need quotes is the server's call, as reserved words do too.
+const quoteIfNeeded = (name) => (completions.quote?.includes(name) ? `"${name.replaceAll('"', '""')}"` : name);
 
 // Offers the columns of the tables in the statement under the cursor. lang-sql
 // only completes them after a table name or alias and a dot.
@@ -99,7 +100,7 @@ function mount(panel) {
 			PostgreSQL.language.data.of({ autocomplete: columnCompletions }),
 			theme,
 			syntaxHighlighting(highlight),
-			placeholder("select 1;  (⌘/Ctrl+Enter to run)"),
+			placeholder("select 1;  (⌘Enter to run)"),
 			EditorView.updateListener.of((update) => {
 				if (!update.docChanged) return;
 				textarea.value = update.state.doc.toString();
@@ -716,9 +717,9 @@ document.addEventListener("htmx:confirm", (event) => {
 	const isQuery = elt.matches("form[hx-post='/query']");
 	if (!isQuery && !elt.matches("[hx-post='/export/choose']")) return;
 	const sql = sqlToRun(elt);
-	if (!isQuery && !sql.trim()) {
+	if (!sql.trim()) {
 		event.preventDefault();
-		document.querySelector("#notice").textContent = "Nothing to export";
+		document.querySelector("#notice").textContent = isQuery ? "Nothing to run" : "Nothing to export";
 		return;
 	}
 	const names = paramNames(sql);

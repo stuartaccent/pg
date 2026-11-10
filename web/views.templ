@@ -131,7 +131,7 @@ templ Index(services []string, current string, readOnly bool, j jobView, err err
 							</div>
 							<!-- The scrolling is out here so that refreshing keeps its place. -->
 							<div class="results flex-1 min-h-0 overflow-auto bg-base-100 select-text">
-								<div id="activity-body" hx-get="/activity" hx-trigger="every 2s [activityLive()]"></div>
+								<div id="activity-body" hx-get="/activity" hx-trigger="every 2s [activityLive()], connected[toolOpen('activity')] from:body"></div>
 							</div>
 						</section>
 						<section id="health-panel" data-tool-panel class="flex-1 min-w-0 min-h-0 overflow-auto bg-base-100 p-3 select-text" hidden>

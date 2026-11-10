@@ -74,7 +74,7 @@ npm test
 
 ## Using it
 
-- ⌘/Ctrl+Enter runs the selection, or the whole editor if nothing's selected. So do Explain, Analyze and Export CSV.
+- ⌘Enter runs the selection, or the whole editor if nothing's selected. So do Explain, Analyze and Export CSV.
 - Several statements show one result after another, each with its own row count. Later ones load as you scroll to them, as a long first result does. Statements sent together are one transaction, so if one fails, those before it are rolled back even though their results stay on screen.
 - `:name` in a query asks for a value before running, offering the last one used. Values go in as quoted text, so `where id = :id` becomes `where id = '42'`, and typing NULL sends a null. They can't stand in for table or column names. History keeps the `:name`.
 - Explain and Analyze show the plan as a tree, each step with a bar for its share of the time, or of the cost if it wasn't run. The slowest step's bar is amber, and row estimates out by 10 times or more are flagged. Click a step for its other details, or use Copy JSON for the raw plan. An `explain` typed into the editor still shows as text.

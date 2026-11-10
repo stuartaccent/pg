@@ -131,7 +131,7 @@ templ BackupsBody(service, database string, canRestore bool, dir string, files [
 						</td>
 						<td class="text-right whitespace-nowrap">
 							@sandboxConnect(sb)
-							<button type="button" class="btn btn-soft btn-error btn-xs" hx-post={ "/sandboxes/" + sb.Name + "/remove" } hx-target="#backups-body">Remove</button>
+							<button type="button" class="btn btn-soft btn-error btn-xs" hx-post={ "/sandboxes/" + sb.Name + "/remove" } hx-target="#backups-body" data-confirm={ "Remove " + sb.Name + " and everything done in it? The backup it came from stays." }>Remove</button>
 						</td>
 					</tr>
 				}
