@@ -661,6 +661,13 @@ document.addEventListener("htmx:configRequest", (event) => {
 	const sql = sqlToRun(elt);
 	formData.set("sql", fillParams(sql, paramValues.get(elt.closest("[data-tab]").dataset.tab) ?? {}));
 	if (path === "/query" && sql.trim()) formData.set("typed", sql.trim());
+	// htmx sends the last button clicked, and WebKit never moves focus off it
+	// for htmx to forget, so ⌘Enter after Explain would explain again.
+	if (path === "/query") {
+		const submitter = event.detail.triggeringEvent?.submitter;
+		if (submitter?.name === "explain") formData.set("explain", submitter.value);
+		else formData.delete("explain");
+	}
 });
 
 // Counts up beside Running…, to tell a slow query from a stuck one.
