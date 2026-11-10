@@ -8,7 +8,7 @@ join pg_class c on c.oid = i.indexrelid
 join pg_class t on t.oid = i.indrelid
 join pg_namespace n on n.oid = t.relnamespace
 where n.nspname not in ('pg_catalog', 'information_schema') and n.nspname !~ '^pg_toast'
-group by n.nspname, t.relname, i.indrelid, i.indkey::text, i.indclass::text, i.indcollation::text,
+group by n.nspname, t.relname, i.indrelid, i.indkey::text, i.indclass::text, i.indcollation::text, i.indoption::text,
 	pg_get_expr(i.indexprs, i.indrelid), pg_get_expr(i.indpred, i.indrelid)
 having count(*) > 1
 order by sum(pg_relation_size(c.oid)) desc;

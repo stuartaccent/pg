@@ -15,6 +15,9 @@ func TestHealth(t *testing.T) {
 		"create temp table health_child (id int, parent_id int references health_parent)",
 		"create index health_a on health_child (id)",
 		"create index health_b on health_child (id)",
+		"create index health_desc on health_child (id desc)",
+		"create temp table health_parts (parent_id int references health_parent) partition by range (parent_id)",
+		"create temp table health_parts_1 partition of health_parts for values from (0) to (10)",
 	} {
 		if _, err := c.read(ctx, sql, nil); err != nil {
 			t.Fatal(err)
@@ -59,6 +62,15 @@ func TestHealth(t *testing.T) {
 	}
 	if !has("Duplicate indexes", "health_a, health_b") {
 		t.Errorf("duplicates not found: %v", found["Duplicate indexes"].Rows)
+	}
+	if has("Duplicate indexes", "health_desc") {
+		t.Error("an index sorted the other way is a duplicate")
+	}
+	if !has("Unindexed foreign keys", "health_parts_parent_id_fkey") || has("Unindexed foreign keys", "health_parts_1") {
+		t.Errorf("partitioned foreign key: %v", found["Unindexed foreign keys"].Rows)
+	}
+	if rows, err := c.read(ctx, "show lock_timeout", nil); err != nil || string(rows[0][0]) != "2s" {
+		t.Errorf("lock_timeout = %s, %v", rows, err)
 	}
 	if !found["Unused indexes"].Usage || found["Duplicate indexes"].Usage {
 		t.Error("usage flags wrong")

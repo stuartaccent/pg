@@ -599,6 +599,12 @@ func (c *Catalog) query(ctx context.Context, sql string, params [][]byte) (*pgco
 		if err != nil {
 			return nil, err
 		}
+		// Health's sizes wait on a locked table, holding up Activity and the
+		// tree, which are what's needed to find the lock.
+		if _, err := fresh.Exec(ctx, "set lock_timeout = '2s'").ReadAll(); err != nil {
+			_ = fresh.Close(ctx)
+			return nil, err
+		}
 		c.conn = fresh
 	}
 	res := c.conn.ExecParams(ctx, sql, params, nil, nil, nil).Read()

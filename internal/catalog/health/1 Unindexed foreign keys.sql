@@ -15,6 +15,7 @@ join pg_class t on t.oid = c.conrelid
 join pg_class p on p.oid = c.confrelid
 join pg_namespace n on n.oid = t.relnamespace
 where c.contype = 'f'
+	and c.conparentid = 0 -- not a partition's copy of its parent's key
 	and n.nspname not in ('pg_catalog', 'information_schema')
 	and not exists (
 		select from pg_index i
