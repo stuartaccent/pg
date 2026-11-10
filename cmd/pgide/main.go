@@ -3,6 +3,7 @@ package main
 
 import (
 	_ "embed"
+	"fmt"
 	"log"
 	"path/filepath"
 	"strings"
@@ -30,16 +31,17 @@ func main() {
 
 	var app *application.App
 	var quitting, asking atomic.Bool
-	// mayQuit asks first if a job is running. AppKit wants an answer straight
-	// away on the main thread, which a dialog can't give, so the answer is no
-	// and the dialog's Quit button starts quitting again.
+	// mayQuit asks first if a job is running, or a tab has a transaction open.
+	// AppKit wants an answer straight away on the main thread, which a dialog
+	// can't give, so the answer is no and the dialog's Quit button starts
+	// quitting again.
 	mayQuit := func() bool {
-		job := srv.RunningJob()
-		if job == "" || quitting.Load() {
+		job, open := srv.RunningJob(), srv.OpenTransactions()
+		if job == "" && open == 0 || quitting.Load() {
 			return true
 		}
 		if asking.CompareAndSwap(false, true) {
-			go askToQuit(app, job, &quitting, &asking)
+			go askToQuit(app, job, open, &quitting, &asking)
 		}
 		return false
 	}
@@ -110,11 +112,18 @@ func main() {
 }
 
 // askToQuit checks that a running job should be stopped, then quits.
-func askToQuit(app *application.App, job string, quitting, asking *atomic.Bool) {
-	dialog := app.Dialog.Question().
-		SetTitle(job + " is still running").
-		SetMessage("Quitting stops it and tidies up what it had started.")
-	dialog.AddButton("Stop and quit").OnClick(func() {
+func askToQuit(app *application.App, job string, open int, quitting, asking *atomic.Bool) {
+	title, message, quit := job+" is still running", "Quitting stops it and tidies up what it had started.", "Stop and quit"
+	if job == "" {
+		title, message, quit = "A tab has an open transaction", "Quitting rolls it back.", "Roll back and quit"
+		if open > 1 {
+			title = fmt.Sprintf("%d tabs have open transactions", open)
+		}
+	} else if open > 0 {
+		message += " It also rolls back the open transaction in a tab."
+	}
+	dialog := app.Dialog.Question().SetTitle(title).SetMessage(message)
+	dialog.AddButton(quit).OnClick(func() {
 		quitting.Store(true)
 		asking.Store(false)
 		go app.Quit()

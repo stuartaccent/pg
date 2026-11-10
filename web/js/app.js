@@ -148,7 +148,9 @@ async function closeTab(id) {
 		return;
 	}
 	if (views.size === 1) return;
-	if (views.get(id).state.doc.length > 0 && !(await ask("Close this tab and discard its SQL?", true))) return;
+	if (inTransaction(id)) {
+		if (!(await ask("This tab has an open transaction. Close it and roll the transaction back?"))) return;
+	} else if (views.get(id).state.doc.length > 0 && !(await ask("Close this tab and discard its SQL?", true))) return;
 	await removeTab(id);
 	if (activeTab === id) {
 		activeTab = [...views.keys()].at(-1);
@@ -173,10 +175,17 @@ async function removeTab(id) {
 	document.querySelector(`[data-tab-button="${id}"]`).remove();
 }
 
+// Whether a tab's last run left a transaction open, by its final summary.
+// Closing the tab, or connecting elsewhere, rolls it back.
+const inTransaction = (id) => [...document.querySelectorAll(`#results-${id} [data-summary]`)].at(-1)?.hasAttribute("data-in-transaction") ?? false;
+const openTransactions = () => [...views.keys()].filter(inTransaction).length;
+
 // There's always a tab, so the first one stays, emptied.
 async function closeAllTabs() {
 	const hasSQL = [...views.values()].some((view) => view.state.doc.length > 0);
-	if (hasSQL && !(await ask("Close all tabs and discard their SQL?", true))) return;
+	if (openTransactions() > 0) {
+		if (!(await ask("A tab has an open transaction. Close all tabs and roll it back?"))) return;
+	} else if (hasSQL && !(await ask("Close all tabs and discard their SQL?", true))) return;
 	const [kept, ...others] = views.keys();
 	await Promise.all(others.map(removeTab));
 	await fetch(`/tabs/${kept}`, { method: "DELETE" }); // ends its session, and any query running in it
@@ -693,6 +702,15 @@ document.addEventListener("htmx:confirm", (event) => {
 	if (elt.dataset?.confirm) {
 		event.preventDefault();
 		ask(elt.dataset.confirm).then((ok) => ok && event.detail.issueRequest(true));
+		return;
+	}
+	// Connecting elsewhere closes every tab's session.
+	if (elt.matches("form[hx-post='/connect']") && openTransactions() > 0) {
+		event.preventDefault();
+		ask("A tab has an open transaction. Connect elsewhere and roll it back?").then((ok) => {
+			if (ok) event.detail.issueRequest(true);
+			else htmx.ajax("GET", "/services", { source: "#service-picker", target: "#service-picker" }); // back to the current one
+		});
 		return;
 	}
 	const isQuery = elt.matches("form[hx-post='/query']");

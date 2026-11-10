@@ -139,12 +139,17 @@ templ MoreRows(p session.Page, tab string) {
 	}
 }
 
+// summary ends a result. data-in-transaction tells app.js to ask before
+// closing the tab, which would roll the transaction back.
 templ summary(p session.Page) {
-	<div class="p-2">
+	<div class="p-2" data-summary data-in-transaction?={ p.InTransaction }>
 		if p.Err != nil {
 			<span class="text-error whitespace-pre-wrap">{ p.Err.Error() }</span>
 		} else {
 			<span class="text-success">{ summaryText(p) }</span>
+		}
+		if p.InTransaction {
+			<span class="badge badge-warning badge-xs ml-1" title="Commit or roll back before closing this tab">in a transaction</span>
 		}
 	</div>
 }
