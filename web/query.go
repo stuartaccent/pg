@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"pg/internal/conn"
@@ -176,7 +177,12 @@ func (s *Server) export(w http.ResponseWriter, r *http.Request) {
 		render(w, r, ExportStatus("", 0, errors.New("choose where to save first")))
 		return
 	}
-	path, rows, err := saveCSV(r.Context(), connect, r.FormValue("sql"), chosen)
+	// Its own connection, so it starts with the tab's search_path at least.
+	searchPath := ""
+	if sess := s.session(tab); sess != nil {
+		searchPath = sess.SearchPath()
+	}
+	path, rows, err := saveCSV(r.Context(), connect, searchPath, r.FormValue("sql"), chosen)
 	render(w, r, ExportStatus(path, rows, err))
 }
 
@@ -188,14 +194,16 @@ func (s *Server) export(w http.ResponseWriter, r *http.Request) {
 //
 // shortcut: Cancel doesn't reach an export, only leaving the page does. Share
 // the session's cancel if long exports turn out to need stopping.
-func saveCSV(ctx context.Context, connect func(context.Context) (*pgconn.PgConn, error), query, path string) (string, int64, error) {
-	dir, pattern := filepath.Dir(path), ".pg-export-*.csv"
+func saveCSV(ctx context.Context, connect func(context.Context) (*pgconn.PgConn, error), searchPath, query, path string) (string, int64, error) {
+	// Written under a name that says it isn't finished, and that Finder shows,
+	// so one cut short by quitting is neither hidden nor taken for whole.
+	dir, pattern := filepath.Dir(path), filepath.Base(path)+".*.partial"
 	if path == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return "", 0, err
 		}
-		dir, pattern = filepath.Join(home, "Downloads"), "pg-export-*.csv"
+		dir, pattern = filepath.Join(home, "Downloads"), "pg-export-*.csv.partial"
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", 0, err
@@ -209,6 +217,11 @@ func saveCSV(ctx context.Context, connect func(context.Context) (*pgconn.PgConn,
 		defer cancel()
 		_ = c.Close(closing)
 	}()
+	if searchPath != "" {
+		if _, err := c.ExecParams(ctx, "select set_config('search_path', $1, false)", [][]byte{[]byte(searchPath)}, nil, nil, nil).Close(); err != nil {
+			return "", 0, err
+		}
+	}
 
 	f, err := os.CreateTemp(dir, pattern)
 	if err != nil {
@@ -223,7 +236,7 @@ func saveCSV(ctx context.Context, connect func(context.Context) (*pgconn.PgConn,
 		return "", 0, err
 	}
 	if path == "" {
-		return f.Name(), rows, nil
+		path = strings.TrimSuffix(f.Name(), ".partial")
 	}
 	if err := os.Rename(f.Name(), path); err != nil {
 		_ = os.Remove(f.Name())

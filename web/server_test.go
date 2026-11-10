@@ -483,7 +483,7 @@ func TestSaveCSV(t *testing.T) {
 	t.Setenv("HOME", home)
 	connect := func(ctx context.Context) (*pgconn.PgConn, error) { return conn.Open(ctx, conn.ServiceDSN(service)) }
 
-	path, rows, err := saveCSV(context.Background(), connect, "select 1 as a", "")
+	path, rows, err := saveCSV(context.Background(), connect, "", "select 1 as a", "")
 	if err != nil || rows != 1 {
 		t.Fatalf("rows = %d, err = %v", rows, err)
 	}
@@ -491,7 +491,7 @@ func TestSaveCSV(t *testing.T) {
 		t.Errorf("file = %q", got)
 	}
 
-	if _, _, err := saveCSV(context.Background(), connect, "select nope", ""); err == nil {
+	if _, _, err := saveCSV(context.Background(), connect, "", "select nope", ""); err == nil {
 		t.Fatal("bad sql: want an error")
 	}
 	files, _ := filepath.Glob(filepath.Join(home, "Downloads", "*"))
@@ -504,20 +504,31 @@ func TestSaveCSV(t *testing.T) {
 	if err := os.WriteFile(chosen, []byte("old"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := saveCSV(context.Background(), connect, "select nope", chosen); err == nil {
+	if _, _, err := saveCSV(context.Background(), connect, "", "select nope", chosen); err == nil {
 		t.Fatal("bad sql: want an error")
 	}
 	if got, _ := os.ReadFile(chosen); string(got) != "old" {
 		t.Errorf("failed export changed the file: %q", got)
 	}
-	if path, _, err := saveCSV(context.Background(), connect, "select 2 as b", chosen); err != nil || path != chosen {
+	if path, _, err := saveCSV(context.Background(), connect, "", "select 2 as b", chosen); err != nil || path != chosen {
 		t.Fatalf("path = %q, err = %v", path, err)
 	}
 	if got, _ := os.ReadFile(chosen); string(got) != "b\n2\n" {
 		t.Errorf("file = %q", got)
 	}
-	if left, _ := filepath.Glob(filepath.Join(home, ".pg-export-*")); len(left) != 0 {
-		t.Errorf("left a temp file: %v", left)
+	if left, _ := filepath.Glob(filepath.Join(home, "*.partial")); len(left) != 0 {
+		t.Errorf("left a partial file: %v", left)
+	}
+	if !strings.HasSuffix(path, ".csv") {
+		t.Errorf("Downloads file = %s", path)
+	}
+
+	// It runs on its own connection, with the tab's search_path.
+	if path, _, err := saveCSV(context.Background(), connect, "pg_catalog, information_schema", "select current_schemas(false)::text", chosen); err != nil || path != chosen {
+		t.Fatalf("path = %q, err = %v", path, err)
+	}
+	if got, _ := os.ReadFile(chosen); !strings.Contains(string(got), "{pg_catalog,information_schema}") {
+		t.Errorf("search_path not used: %q", got)
 	}
 }
 

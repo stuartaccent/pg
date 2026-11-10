@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -135,6 +136,10 @@ type Session struct {
 	// inTx is whether the last finished query left a transaction open. Not
 	// guarded by mu, so quitting can ask while a query runs.
 	inTx atomic.Bool
+	// searchPath is the session's search_path once a query has mentioned it,
+	// for Export's own connection to match. Not guarded by mu, for the same
+	// reason.
+	searchPath atomic.Pointer[string]
 }
 
 type query struct {
@@ -415,6 +420,7 @@ func (s *Session) expire(q *query, armed int) {
 // with mu held.
 func (s *Session) finish(q *query, p Page) Page {
 	p.Err = q.mrr.Close()
+	s.noteSearchPath(q.sql)
 	// Statements sent together are one transaction, so results already on
 	// screen can look like they took effect.
 	if p.Err != nil && q.ran > 0 && s.conn.TxStatus() == 'I' {
@@ -457,6 +463,30 @@ func (s *Session) noteTransaction(p *Page) {
 	}
 	p.InTransaction = s.conn != nil && !s.conn.IsClosed() && s.conn.TxStatus() != 'I'
 	s.inTx.Store(p.InTransaction)
+}
+
+// noteSearchPath reads the search_path back after a query that mentions it,
+// so only those cost a round trip. Must be called with mu held.
+func (s *Session) noteSearchPath(sql string) {
+	if s.conn == nil || s.conn.IsClosed() || !strings.Contains(strings.ToLower(sql), "search_path") {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	res := s.conn.ExecParams(ctx, "select current_setting('search_path')", nil, nil, nil, nil).Read()
+	if res.Err == nil && len(res.Rows) == 1 {
+		path := string(res.Rows[0][0])
+		s.searchPath.Store(&path)
+	}
+}
+
+// SearchPath returns the search_path a query in the session set, or "" if none
+// has mentioned it.
+func (s *Session) SearchPath() string {
+	if path := s.searchPath.Load(); path != nil {
+		return *path
+	}
+	return ""
 }
 
 // InTransaction reports whether the last query left a transaction open, which

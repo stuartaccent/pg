@@ -592,3 +592,16 @@ func TestOnlyReads(t *testing.T) {
 		}
 	}
 }
+
+func TestSearchPathIsRemembered(t *testing.T) {
+	s := newTestSession(t)
+	if p := s.Run("select 1"); p.Err != nil || s.SearchPath() != "" {
+		t.Fatalf("before = %q, %v", s.SearchPath(), p.Err)
+	}
+	if p := s.Run("set search_path = pg_catalog, public; select 1"); p.Err != nil {
+		t.Fatal(p.Err)
+	}
+	if got := s.SearchPath(); got != "pg_catalog, public" {
+		t.Errorf("search_path = %q", got)
+	}
+}
