@@ -44,12 +44,10 @@ It keeps its own tabs and settings, separate from `go run`. History is shared by
 ## Work on the UI
 
 ```sh
-templ generate --watch      # in one terminal
-go run ./cmd/dev            # in another, then open http://127.0.0.1:8080
+go tool templ generate --watch   # in one terminal
+go run ./cmd/dev               # in another, then open http://127.0.0.1:8080
 tmp/tailwindcss -i web/css/app.css -o web/static/app.css --minify --watch   # when changing classes
 ```
-
-The templ CLI version should match the `github.com/a-h/templ` version in go.mod.
 
 The SQL editor is CodeMirror 6, bundled from `web/js/app.js` into `web/static/app.js`, which is generated and kept in the repo. Node is only needed to change it:
 

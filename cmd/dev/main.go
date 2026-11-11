@@ -1,5 +1,5 @@
 // Command dev serves the UI on localhost for working on it in a normal
-// browser, without rebuilding the Wails app. Pair with `templ generate --watch`.
+// browser, without rebuilding the Wails app. Pair with `go tool templ generate --watch`.
 package main
 
 import (
