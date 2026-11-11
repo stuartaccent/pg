@@ -54,6 +54,7 @@ func (s *Server) query(w http.ResponseWriter, r *http.Request) {
 	// As typed, so running it again from History asks for its params again.
 	if typed := r.FormValue("typed"); typed != "" {
 		s.remember(r.Context(), typed, r.FormValue("sql"))
+		w.Header().Set("HX-Trigger", "history-changed")
 	}
 	if r.FormValue("explain") != "" {
 		render(w, r, Results(sess.Explain(r.FormValue("sql"), r.FormValue("explain") == "analyze"), tab))
