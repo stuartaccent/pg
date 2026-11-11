@@ -1,0 +1,61 @@
+version: '3'
+
+tasks:
+  run:
+    desc: Run the desktop app
+    cmds:
+      - go run ./cmd/pgide
+
+  bundle:
+    desc: Build dist/pg.app
+    cmds:
+      - scripts/bundle.sh
+
+  dev:
+    desc: Serve the UI on http://127.0.0.1:8080, regenerating templ and CSS as they change
+    deps: [tailwind]
+    cmds:
+      - task: dev-parallel
+
+  dev-parallel:
+    internal: true
+    deps: [templ-watch, css-watch, serve]
+
+  templ-watch:
+    internal: true
+    cmds:
+      - go tool templ generate --watch
+
+  css-watch:
+    internal: true
+    cmds:
+      - tmp/tailwindcss -i web/css/app.css -o web/static/app.css --minify --watch=always
+
+  serve:
+    internal: true
+    cmds:
+      - go run ./cmd/dev
+
+  generate:
+    desc: Regenerate the templ views, CSS and JS bundle
+    deps: [tailwind]
+    cmds:
+      - go tool templ generate
+      - tmp/tailwindcss -i web/css/app.css -o web/static/app.css --minify
+      - npm ci
+      - npm run build
+
+  test:
+    desc: Run the Go and JS tests (set PGIDE_TEST_SERVICE for the ones that need a server)
+    cmds:
+      - go test -race ./...
+      - npm test
+
+  tailwind:
+    desc: Fetch the Tailwind standalone CLI into tmp
+    status:
+      - test -x tmp/tailwindcss
+    cmds:
+      - mkdir -p tmp
+      - curl -fsSLo tmp/tailwindcss https://github.com/tailwindlabs/tailwindcss/releases/download/v4.3.3/tailwindcss-macos-arm64
+      - chmod +x tmp/tailwindcss

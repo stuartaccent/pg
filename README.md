@@ -28,6 +28,8 @@ options=-c default_transaction_read_only=on
 
 ## Run
 
+The commands below are also tasks in `Taskfile.yml`: `task --list` shows them, and `task dev` starts all of Work on the UI at once.
+
 ```sh
 go run ./cmd/pgide          # the desktop app (needs Xcode command line tools for cgo)
 ```
