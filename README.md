@@ -43,6 +43,18 @@ cp -R dist/pg.app /Applications
 
 It keeps its own tabs and settings, separate from `go run`. History is shared by both.
 
+## Releases
+
+Pushing a tag builds `pg-darwin-arm64.zip` on GitHub Actions and attaches it to a release:
+
+```sh
+git tag v0.1.0 && git push --tags
+```
+
+A release build checks for a newer release on launch and once a day, and has Help › Check for Updates…. Builds made locally report version `dev` and never update.
+
+The build is signed ad hoc rather than with a Developer ID, so macOS blocks it the first time. After unzipping it into `/Applications`, open it once from System Settings › Privacy & Security › Open Anyway, or run `xattr -dr com.apple.quarantine /Applications/pg.app`. Updates install without that step.
+
 ## Work on the UI
 
 ```sh

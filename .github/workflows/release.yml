@@ -1,0 +1,28 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest # arm64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build pg.app
+        run: VERSION="${GITHUB_REF_NAME#v}" scripts/bundle.sh
+      - name: Package
+        # ditto keeps the bundle's signature intact, which zip can break.
+        run: |
+          ditto -c -k --keepParent dist/pg.app dist/pg-darwin-arm64.zip
+          cd dist && shasum -a 256 pg-darwin-arm64.zip > SHA256SUMS
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/pg-darwin-arm64.zip dist/SHA256SUMS --generate-notes

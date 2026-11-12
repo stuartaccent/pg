@@ -2,15 +2,19 @@
 package main
 
 import (
+	"context"
 	_ "embed"
 	"fmt"
 	"log"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
+	"github.com/wailsapp/wails/v3/pkg/updater"
+	"github.com/wailsapp/wails/v3/pkg/updater/providers/github"
 
 	"pg/web"
 )
@@ -19,6 +23,10 @@ import (
 //
 //go:embed icon.png
 var icon []byte
+
+// version is the release this was built as, set by scripts/bundle.sh. Builds
+// left at "dev" don't update themselves.
+var version = "dev"
 
 // The page's background, so a window has no white flash while it loads.
 var (
@@ -56,7 +64,8 @@ func main() {
 			ApplicationShouldTerminateAfterLastWindowClosed: true,
 		},
 	})
-	app.Menu.Set(appMenu(app))
+	updates := version != "dev" && initUpdater(app)
+	app.Menu.Set(appMenu(app, updates))
 
 	srv.ChooseFile = func(dir, name string) (string, error) {
 		ext := filepath.Ext(name)
@@ -82,6 +91,16 @@ func main() {
 	// puts the default tile back when launching finishes, so set it after that.
 	app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
 		app.SetIcon(icon)
+
+		// Only check-and-install once something is found, or the update window
+		// would open on every launch to say there's nothing new.
+		if updates {
+			go func() {
+				if rel, err := app.Updater.Check(context.Background()); err == nil && rel != nil {
+					checkForUpdates(app)
+				}
+			}()
+		}
 
 		// Made here as the system's appearance can't be read before the app starts.
 		background := lightBackground
@@ -134,8 +153,33 @@ func askToQuit(app *application.App, job string, open int, quitting, asking *ato
 	dialog.SetDefaultButton(keep).SetCancelButton(keep).Show()
 }
 
+// initUpdater points the updater at the GitHub releases, reporting whether it
+// could.
+func initUpdater(app *application.App) bool {
+	gh, err := github.New(github.Config{Repository: "stuartaccent/pg", ChecksumAsset: "SHA256SUMS"})
+	if err == nil {
+		err = app.Updater.Init(updater.Config{
+			CurrentVersion: version,
+			Providers:      []updater.Provider{gh},
+			CheckInterval:  24 * time.Hour,
+		})
+	}
+	if err != nil {
+		log.Printf("updates are off: %v", err)
+		return false
+	}
+	return true
+}
+
+// checkForUpdates runs the updater's own flow, which shows its window.
+func checkForUpdates(app *application.App) {
+	if err := app.Updater.CheckAndInstall(context.Background()); err != nil {
+		log.Printf("update: %v", err)
+	}
+}
+
 // appMenu is the standard menus, with File running the page's own commands.
-func appMenu(app *application.App) *application.Menu {
+func appMenu(app *application.App, updates bool) *application.Menu {
 	menu := app.Menu.New()
 	menu.AddRole(application.AppMenu)
 	file := menu.AddSubmenu("File")
@@ -164,6 +208,12 @@ func appMenu(app *application.App) *application.Menu {
 	menu.AddRole(application.EditMenu)
 	menu.AddRole(application.ViewMenu)
 	menu.AddRole(application.WindowMenu)
-	menu.AddRole(application.HelpMenu)
+	if updates {
+		menu.AddSubmenu("Help").Add("Check for Updates…").OnClick(func(*application.Context) {
+			go checkForUpdates(app)
+		})
+	} else {
+		menu.AddRole(application.HelpMenu)
+	}
 	return menu
 }

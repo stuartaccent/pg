@@ -5,10 +5,11 @@ set -eu
 cd "$(dirname "$0")/.."
 
 app=dist/pg.app
+version=${VERSION:-dev} # the release tag without its "v"; "dev" builds don't update
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 
-go build -o "$app/Contents/MacOS/pg" ./cmd/pgide
+go build -ldflags "-X main.version=$version" -o "$app/Contents/MacOS/pg" ./cmd/pgide
 
 iconset=$(mktemp -d)/icon.iconset
 mkdir "$iconset"
@@ -19,7 +20,7 @@ for size in 16 32 128 256 512; do
 done
 iconutil --convert icns --output "$app/Contents/Resources/icon.icns" "$iconset"
 
-cat >"$app/Contents/Info.plist" <<'PLIST'
+cat >"$app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -37,7 +38,7 @@ cat >"$app/Contents/Info.plist" <<'PLIST'
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.0</string>
+	<string>$version</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
 	<key>NSHighResolutionCapable</key>
