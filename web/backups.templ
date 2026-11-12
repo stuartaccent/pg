@@ -153,7 +153,10 @@ templ sandboxConnect(sb dockerpg.Sandbox) {
 			@connectField("User", "postgres")
 			@connectField("Password", sb.Password)
 		</dl>
-		<button type="button" class="btn btn-soft btn-xs w-full mt-3" data-copy={ sb.URL() } onclick="copyFrom(this)">Copy URL</button>
+		<div class="grid grid-cols-2 gap-2 mt-3">
+			<button type="button" class="btn btn-soft btn-xs" data-copy={ sb.URL() } onclick="copyFrom(this)">Copy URL</button>
+			<button type="button" class="btn btn-soft btn-xs" data-copy={ sb.ServiceEntry() } onclick="copyFrom(this)" title="A section to paste into the service file">Copy service entry</button>
+		</div>
 	</div>
 }
 

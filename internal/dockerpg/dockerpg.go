@@ -240,6 +240,12 @@ func (s Sandbox) URL() string {
 	return u.String()
 }
 
+// ServiceEntry is a pg_service.conf section for it, to paste in by hand.
+// pg never writes the service file itself.
+func (s Sandbox) ServiceEntry() string {
+	return fmt.Sprintf("[%s]\nhost=127.0.0.1\nport=%d\ndbname=%s\nuser=postgres\npassword=%s\nsslmode=disable\n", s.Name, s.Port, sandboxDB, s.Password)
+}
+
 // Database is the name of the database a sandbox holds the backup in.
 func (Sandbox) Database() string { return sandboxDB }
 

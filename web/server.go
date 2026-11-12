@@ -281,7 +281,9 @@ func serviceList(ctx context.Context) ([]string, []dockerpg.Sandbox, error) {
 	defer cancel()
 	sandboxes, _ := dockerpg.Sandboxes(ctx)
 	for _, sb := range sandboxes {
-		services = append(services, sb.Name)
+		if !slices.Contains(services, sb.Name) { // pasted into the service file too
+			services = append(services, sb.Name)
+		}
 	}
 	return services, sandboxes, err
 }
