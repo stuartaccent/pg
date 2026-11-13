@@ -142,7 +142,7 @@ func TestStartersOnlyArriveOnce(t *testing.T) {
 	t.Setenv("HOME", home)
 	s := New()
 	body := get(t, s, http.MethodGet, "/queries").Body.String()
-	for _, want := range []string{"Create role", "Server/Overview", "Activity/Long-running queries", "Tables/Cache hit rate", "Tables/Table sizes"} {
+	for _, want := range []string{"Auth/Create role", "Server/Overview", "Activity/Long-running queries", "Tables/Cache hit rate", "Tables/Table sizes"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("%q not listed", want)
 		}
