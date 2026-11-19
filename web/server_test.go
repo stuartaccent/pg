@@ -152,8 +152,7 @@ func postForm(s *Server, path string, form url.Values) *httptest.ResponseRecorde
 
 func TestStartersOnlyArriveOnce(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home) // Windows' home
+	setHome(t, home)
 	s := New()
 	body := get(t, s, http.MethodGet, "/queries").Body.String()
 	for _, want := range []string{"Auth/Create role", "Server/Overview", "Activity/Long-running queries", "Tables/Cache hit rate", "Tables/Table sizes"} {
@@ -171,8 +170,7 @@ func TestStartersOnlyArriveOnce(t *testing.T) {
 
 func TestSaveAndReadQuery(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home) // Windows' home
+	setHome(t, home)
 	s := New()
 	save := func(name, text, overwrite string) *httptest.ResponseRecorder {
 		return postForm(s, "/queries", url.Values{"name": {name}, "text": {text}, "overwrite": {overwrite}})
@@ -209,8 +207,7 @@ func TestSaveAndReadQuery(t *testing.T) {
 
 func TestQueriesStayInTheFolder(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home) // Windows' home
+	setHome(t, home)
 	s := New()
 	for _, name := range []string{"", "../escape", "a/../../escape", "/tmp/escape", "a//b", "a/", ".hidden", "a/.hidden", ".."} {
 		w := postForm(s, "/queries", url.Values{"name": {name}, "text": {"select 1"}})
@@ -233,8 +230,7 @@ func TestQueriesStayInTheFolder(t *testing.T) {
 
 func TestQueriesInSubfolders(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home) // Windows' home
+	setHome(t, home)
 	s := New()
 	w := postForm(s, "/queries", url.Values{"name": {"stats/deep/Sizes"}, "text": {"select 1"}})
 	if w.Code != http.StatusNoContent {
@@ -265,8 +261,7 @@ func TestQueriesInSubfolders(t *testing.T) {
 
 func TestOpenQueryWithTheDialog(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home) // Windows' home
+	setHome(t, home)
 	root := filepath.Join(home, "pg-queries")
 	s := New()
 	open := func() *httptest.ResponseRecorder { return postForm(s, "/queries/pick", nil) }
@@ -315,8 +310,7 @@ func TestOpenQueryWithTheDialog(t *testing.T) {
 
 func TestSaveQueryWithTheDialog(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home) // Windows' home
+	setHome(t, home)
 	root := filepath.Join(home, "pg-queries")
 	s := New()
 	save := func(name, text string) *httptest.ResponseRecorder {
@@ -387,8 +381,7 @@ func TestSaveQueryWithTheDialog(t *testing.T) {
 
 func TestOpenQueriesFolder(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home) // Windows' home
+	setHome(t, home)
 	var opened string
 	real := openFolder
 	openFolder = func(path string) error {
@@ -503,8 +496,7 @@ func TestSaveCSV(t *testing.T) {
 	t.Setenv("PGSERVICEFILE", services)
 	t.Setenv("PGPASSFILE", passwords)
 	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home) // Windows' home
+	setHome(t, home)
 	connect := func(ctx context.Context) (*pgconn.PgConn, error) { return conn.Open(ctx, conn.ServiceDSN(service)) }
 
 	path, rows, err := saveCSV(context.Background(), connect, "", "select 1 as a", "")
@@ -935,8 +927,7 @@ func TestHumanSize(t *testing.T) {
 
 func TestOpenBackupsFolder(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home) // Windows' home
+	setHome(t, home)
 	var opened string
 	real := openFolder
 	openFolder = func(path string) error {
@@ -992,8 +983,7 @@ func TestDescribeDifferences(t *testing.T) {
 
 func TestDeleteBackup(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home) // Windows' home
+	setHome(t, home)
 	dir := filepath.Join(home, "pg-backups")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
@@ -1036,8 +1026,7 @@ func TestDeleteBackup(t *testing.T) {
 
 func TestRestoreRefuses(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home) // Windows' home
+	setHome(t, home)
 	dir := filepath.Join(home, "pg-backups")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
@@ -1110,8 +1099,7 @@ func TestDropdownKeepsARestoredDatabase(t *testing.T) {
 
 func TestReplaceRefuses(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home) // Windows' home
+	setHome(t, home)
 	dir := filepath.Join(home, "pg-backups")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
