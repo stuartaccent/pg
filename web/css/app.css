@@ -86,18 +86,15 @@
     --editor-height: 12rem;
 }
 
-/* One rule rather than classes on every cell: results can be thousands of rows. */
+/* One rule rather than classes on every cell: results can be thousands of rows.
+   One line each, so a value with line breaks can't make a row taller than
+   the screen: clicking a cell shows all of it. */
 .results :is(th, td) {
-    @apply max-w-[40ch] overflow-hidden text-ellipsis whitespace-pre;
+    @apply max-w-[40ch] overflow-hidden text-ellipsis whitespace-nowrap;
 }
 
 .results tr[data-row] td {
     @apply cursor-pointer hover:bg-base-200;
-}
-
-/* A query's line breaks would make rows jump about as the list refreshes. */
-#activity-body td {
-    white-space: nowrap;
 }
 
 /* The last tab stays open: there's nowhere to go without one. Hidden rather
