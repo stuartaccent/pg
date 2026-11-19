@@ -15,7 +15,7 @@ jobs:
         with:
           go-version-file: go.mod
       - run: go tool templ generate
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: templ-generated
@@ -80,7 +80,7 @@ jobs:
           $dlls
           $extra = $dlls | Where-Object { $_ -match '^(libgcc|libwinpthread|libstdc|libssp)' }
           if ($extra) { throw "pg.exe needs MinGW's DLLs: $extra" }
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: pg-windows-amd64
           path: |
