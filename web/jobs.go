@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -245,10 +244,9 @@ func (s *Server) backups(w http.ResponseWriter, r *http.Request) {
 	s.renderBackups(w, r, nil)
 }
 
-// openFolder shows path in the Finder. It's a variable for the tests.
-var openFolder = func(path string) error {
-	return exec.Command("open", path).Run()
-}
+// openFolder shows path in the Finder, or File Explorer. It's a variable for
+// the tests.
+var openFolder = showFolder
 
 func (s *Server) openBackups(w http.ResponseWriter, r *http.Request) {
 	dir, err := backupDir()

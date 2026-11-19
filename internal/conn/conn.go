@@ -1,7 +1,8 @@
 // Package conn lists the services in pg_service.conf and opens connections to them.
 //
 // Connection details and passwords come from the standard Postgres files
-// (~/.pg_service.conf and ~/.pgpass), so the app stores no credentials itself.
+// (~/.pg_service.conf and ~/.pgpass, or their equivalents in
+// %APPDATA%\postgresql on Windows), so the app stores no credentials itself.
 package conn
 
 import (
@@ -24,29 +25,22 @@ import (
 )
 
 // ServiceFilePath returns the service file libpq would read: $PGSERVICEFILE,
-// falling back to ~/.pg_service.conf.
+// falling back to ~/.pg_service.conf, or %APPDATA%\postgresql\.pg_service.conf
+// on Windows.
 func ServiceFilePath() (string, error) {
 	if p := os.Getenv("PGSERVICEFILE"); p != "" {
 		return p, nil
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, ".pg_service.conf"), nil
+	return defaultServiceFile()
 }
 
 // PassFilePath returns the password file libpq would read: $PGPASSFILE, falling
-// back to ~/.pgpass.
+// back to ~/.pgpass, or %APPDATA%\postgresql\pgpass.conf on Windows.
 func PassFilePath() (string, error) {
 	if p := os.Getenv("PGPASSFILE"); p != "" {
 		return p, nil
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, ".pgpass"), nil
+	return defaultPassFile()
 }
 
 // ExposedPassFile returns the path of the password file if anyone but its owner
@@ -58,7 +52,7 @@ func ExposedPassFile() string {
 		return ""
 	}
 	info, err := os.Stat(path)
-	if err != nil || info.Mode().Perm()&0o077 == 0 {
+	if err != nil || !exposed(info) {
 		return ""
 	}
 	return path
@@ -66,8 +60,12 @@ func ExposedPassFile() string {
 
 // EnsureFile creates path if it's missing, readable only by its owner, as
 // libpq ignores a .pgpass that anyone else can read. An existing file is left
-// exactly as it is.
+// exactly as it is. Its folder is made too, as %APPDATA%\postgresql may not
+// be there yet.
 func EnsureFile(path string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDONLY, 0o600)
 	if err != nil {
 		return err

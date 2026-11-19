@@ -9,7 +9,11 @@ version=${VERSION:-dev} # the release tag without its "v"; "dev" builds don't up
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 
-go build -ldflags "-X main.version=$version" -o "$app/Contents/MacOS/pg" ./cmd/pgide
+ldflags="-X main.version=$version"
+if [ -n "${REPOSITORY:-}" ]; then # owner/name, where updates come from
+	ldflags="$ldflags -X main.repository=$REPOSITORY"
+fi
+go build -ldflags "$ldflags" -o "$app/Contents/MacOS/pg" ./cmd/pgide
 
 iconset=$(mktemp -d)/icon.iconset
 mkdir "$iconset"

@@ -20,6 +20,8 @@ import { warningFor } from "./risky.mjs";
 import { tablesAt } from "./tables.mjs";
 import { updateSQL } from "./update.mjs";
 
+// Shortcut hints say ⌘ on a Mac and Ctrl elsewhere, as CodeMirror's Mod does.
+const isMac = /Mac/.test(navigator.platform);
 const views = new Map(); // tab id to its editor
 const language = new Compartment();
 let completions = {};
@@ -118,7 +120,7 @@ function mount(panel) {
 			PostgreSQL.language.data.of({ autocomplete: columnCompletions }),
 			theme,
 			syntaxHighlighting(highlight),
-			placeholder("select 1;  (⌘Enter to run)"),
+			placeholder(`select 1;  (${isMac ? "⌘" : "Ctrl+"}Enter to run)`),
 			EditorView.updateListener.of((update) => {
 				if (!update.docChanged) return;
 				textarea.value = update.state.doc.toString();
@@ -719,8 +721,10 @@ document.addEventListener("keydown", (event) => {
 Object.assign(window, { toolOpen, showSidebar, fromMenu, newTab, closeActiveTab, selectTab, closeTab, closeAllTabs, useSQL, useDefinition, resetTree, formatSQL, showHistory, chooseHistory, sortHistory, showQueries, useQuery, openQueryFile, saveQuery, showActivity, showHealth, showPsql, activityLive, showBackups, showRestore, closeRestore, showReplace, checkReplace, closeReplace, copyCell, updateCell, copyPlan, copyFrom });
 
 // Wails holds back the menu's commands until its runtime says the page is ready.
-// This page doesn't load that runtime, so it says so itself.
+// This page doesn't load that runtime, so it says so itself: through WebKit on
+// macOS, and WebView2 on Windows.
 window.webkit?.messageHandlers?.external?.postMessage("wails:runtime:ready");
+window.chrome?.webview?.postMessage("wails:runtime:ready");
 
 document.addEventListener("click", (event) => {
 	const td = event.target.closest?.(".results tr[data-row] td");

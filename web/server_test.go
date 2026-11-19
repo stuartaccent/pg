@@ -13,13 +13,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/creack/pty"
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"pg/internal/catalog"
@@ -27,7 +27,20 @@ import (
 	"pg/internal/dockerpg"
 	"pg/internal/history"
 	"pg/internal/session"
+	"pg/internal/term"
 )
+
+// private reports whether info's mode is mode, as pg sets for its own files.
+// Windows has no mode bits, as such: it keeps files private with ACLs.
+func private(info os.FileInfo, mode os.FileMode) bool {
+	return runtime.GOOS == "windows" || info.Mode().Perm() == mode
+}
+
+// setHome makes dir the home folder, on Windows too.
+func setHome(t *testing.T, dir string) {
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
+}
 
 func get(t *testing.T, s *Server, method, url string) *httptest.ResponseRecorder {
 	t.Helper()
@@ -140,6 +153,7 @@ func postForm(s *Server, path string, form url.Values) *httptest.ResponseRecorde
 func TestStartersOnlyArriveOnce(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // Windows' home
 	s := New()
 	body := get(t, s, http.MethodGet, "/queries").Body.String()
 	for _, want := range []string{"Auth/Create role", "Server/Overview", "Activity/Long-running queries", "Tables/Cache hit rate", "Tables/Table sizes"} {
@@ -158,6 +172,7 @@ func TestStartersOnlyArriveOnce(t *testing.T) {
 func TestSaveAndReadQuery(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // Windows' home
 	s := New()
 	save := func(name, text, overwrite string) *httptest.ResponseRecorder {
 		return postForm(s, "/queries", url.Values{"name": {name}, "text": {text}, "overwrite": {overwrite}})
@@ -195,6 +210,7 @@ func TestSaveAndReadQuery(t *testing.T) {
 func TestQueriesStayInTheFolder(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // Windows' home
 	s := New()
 	for _, name := range []string{"", "../escape", "a/../../escape", "/tmp/escape", "a//b", "a/", ".hidden", "a/.hidden", ".."} {
 		w := postForm(s, "/queries", url.Values{"name": {name}, "text": {"select 1"}})
@@ -218,6 +234,7 @@ func TestQueriesStayInTheFolder(t *testing.T) {
 func TestQueriesInSubfolders(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // Windows' home
 	s := New()
 	w := postForm(s, "/queries", url.Values{"name": {"stats/deep/Sizes"}, "text": {"select 1"}})
 	if w.Code != http.StatusNoContent {
@@ -249,6 +266,7 @@ func TestQueriesInSubfolders(t *testing.T) {
 func TestOpenQueryWithTheDialog(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // Windows' home
 	root := filepath.Join(home, "pg-queries")
 	s := New()
 	open := func() *httptest.ResponseRecorder { return postForm(s, "/queries/pick", nil) }
@@ -298,6 +316,7 @@ func TestOpenQueryWithTheDialog(t *testing.T) {
 func TestSaveQueryWithTheDialog(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // Windows' home
 	root := filepath.Join(home, "pg-queries")
 	s := New()
 	save := func(name, text string) *httptest.ResponseRecorder {
@@ -369,6 +388,7 @@ func TestSaveQueryWithTheDialog(t *testing.T) {
 func TestOpenQueriesFolder(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // Windows' home
 	var opened string
 	real := openFolder
 	openFolder = func(path string) error {
@@ -484,6 +504,7 @@ func TestSaveCSV(t *testing.T) {
 	t.Setenv("PGPASSFILE", passwords)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // Windows' home
 	connect := func(ctx context.Context) (*pgconn.PgConn, error) { return conn.Open(ctx, conn.ServiceDSN(service)) }
 
 	path, rows, err := saveCSV(context.Background(), connect, "", "select 1 as a", "")
@@ -635,7 +656,7 @@ func TestEditConfig(t *testing.T) {
 			t.Errorf("%s status = %d", file, got)
 		}
 		info, err := os.Stat(filepath.Join(dir, file))
-		if err != nil || info.Mode().Perm() != 0o600 {
+		if err != nil || !private(info, 0o600) {
 			t.Errorf("%s: %v, %v", file, info, err)
 		}
 	}
@@ -651,15 +672,17 @@ func TestEditConfig(t *testing.T) {
 }
 
 func TestPsql(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	// sh stands in for docker: it reads a line, then says what it got and its size.
+	setHome(t, t.TempDir())
+	// The test binary stands in for docker: it reads a line, then says what it
+	// got and its size.
 	var started []string
 	real := startPsql
-	startPsql = func(ctx context.Context, settings conn.Settings, readOnly bool, image, dir string) (*os.File, *exec.Cmd, string, error) {
+	startPsql = func(ctx context.Context, settings conn.Settings, readOnly bool, image, dir string) (term.Term, string, error) {
 		started = append(started, fmt.Sprint(readOnly, " ", image, " ", dir))
-		cmd := exec.CommandContext(ctx, "sh", "-c", "read line; echo \"got:$line size:$(stty size)\"; [ \"$line\" = wait ] && sleep 30")
-		f, err := pty.Start(cmd)
-		return f, cmd, "your psql is old", err
+		cmd := exec.CommandContext(ctx, os.Args[0])
+		cmd.Env = append(os.Environ(), "WEB_HELPER=psql")
+		t, err := term.Start(ctx, cmd)
+		return t, "your psql is old", err
 	}
 	t.Cleanup(func() { startPsql = real })
 
@@ -673,7 +696,7 @@ func TestPsql(t *testing.T) {
 			t.Fatalf("status = %d", got)
 		}
 	}
-	if len(started) != 1 || !strings.HasPrefix(started[0], "true ") || !strings.HasSuffix(started[0], "/pg-queries") {
+	if len(started) != 1 || !strings.HasPrefix(started[0], "true ") || !strings.HasSuffix(started[0], string(filepath.Separator)+"pg-queries") {
 		t.Fatalf("started = %v", started)
 	}
 	if got := get(t, s, http.MethodPost, "/psql/size?cols=x&rows=40").Code; got != http.StatusBadRequest {
@@ -681,9 +704,10 @@ func TestPsql(t *testing.T) {
 	}
 	get(t, s, http.MethodPost, "/psql/size?cols=100&rows=40")
 	w := httptest.NewRecorder()
-	s.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/psql/in", strings.NewReader("hello\n")))
+	// Enter is \r, as xterm.js sends it.
+	s.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/psql/in", strings.NewReader("hello\r")))
 	// Each read returns what's ready, the notice first, until no content once
-	// sh has exited.
+	// it has exited.
 	var all strings.Builder
 	for {
 		got, code := readPsql(t, s)
@@ -706,7 +730,7 @@ func TestPsql(t *testing.T) {
 		t.Fatalf("not restarted: %v", started)
 	}
 	w = httptest.NewRecorder()
-	s.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/psql/in", strings.NewReader("wait\n")))
+	s.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/psql/in", strings.NewReader("wait\r")))
 	// What it wrote comes back while it's still running, not once it exits:
 	// WebKit held back the end of a response that hadn't finished.
 	for all.Reset(); !strings.Contains(all.String(), "got:wait"); {
@@ -771,6 +795,7 @@ func TestServicesListsTheFileAgain(t *testing.T) {
 }
 
 func TestPasswordHint(t *testing.T) {
+	t.Setenv("PGPASSFILE", filepath.Join(t.TempDir(), "pgpass"))
 	for err, want := range map[error]bool{
 		&pgconn.PgError{Code: "28P01"}: true,
 		&pgconn.PgError{Code: "3D000"}: false,
@@ -779,7 +804,7 @@ func TestPasswordHint(t *testing.T) {
 		if rerr := ConnectStatus("", false, err).Render(context.Background(), &b); rerr != nil {
 			t.Fatal(rerr)
 		}
-		if got := strings.Contains(b.String(), ".pgpass"); got != want {
+		if got := strings.Contains(b.String(), "Passwords go in "+passFile()); got != want {
 			t.Errorf("%v: hint shown = %v", err, got)
 		}
 	}
@@ -799,6 +824,8 @@ func TestExposedPasswordFileWarning(t *testing.T) {
 		if err := ConnectStatus("local", false, nil).Render(context.Background(), &b); err != nil {
 			t.Fatal(err)
 		}
+		// Windows has no mode bits for Postgres to check, so it never warns.
+		want := want && runtime.GOOS != "windows"
 		if got := strings.Contains(b.String(), "chmod 600 "+path); got != want {
 			t.Errorf("%o: warning shown = %v", mode, got)
 		}
@@ -806,7 +833,7 @@ func TestExposedPasswordFileWarning(t *testing.T) {
 }
 
 func TestSandboxOnlyTakesAFileInTheBackupFolder(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setHome(t, t.TempDir())
 	for _, file := range []string{"../../etc/passwd", "/etc/passwd", "missing.backup", "notes.txt", ""} {
 		w := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodPost, "/sandboxes", strings.NewReader(url.Values{"file": {file}}.Encode()))
@@ -909,6 +936,7 @@ func TestHumanSize(t *testing.T) {
 func TestOpenBackupsFolder(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // Windows' home
 	var opened string
 	real := openFolder
 	openFolder = func(path string) error {
@@ -925,7 +953,7 @@ func TestOpenBackupsFolder(t *testing.T) {
 		t.Errorf("opened %q, want %q", opened, want)
 	}
 	// It's made if need be, as there'd be nothing to open otherwise.
-	if info, err := os.Stat(want); err != nil || info.Mode().Perm() != 0o700 {
+	if info, err := os.Stat(want); err != nil || !private(info, 0o700) {
 		t.Errorf("folder: %v, %v", info, err)
 	}
 
@@ -936,7 +964,7 @@ func TestOpenBackupsFolder(t *testing.T) {
 }
 
 func TestVerifyOnlyTakesAFileInTheBackupFolder(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setHome(t, t.TempDir())
 	for _, file := range []string{"../../etc/passwd", "missing.backup", "notes.txt", ""} {
 		w := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodPost, "/backups/verify", strings.NewReader(url.Values{"file": {file}}.Encode()))
@@ -965,6 +993,7 @@ func TestDescribeDifferences(t *testing.T) {
 func TestDeleteBackup(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // Windows' home
 	dir := filepath.Join(home, "pg-backups")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
@@ -1008,6 +1037,7 @@ func TestDeleteBackup(t *testing.T) {
 func TestRestoreRefuses(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // Windows' home
 	dir := filepath.Join(home, "pg-backups")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
@@ -1046,7 +1076,7 @@ func TestRestoreRefuses(t *testing.T) {
 }
 
 func TestRestoreButtonNeedsAWritableConnection(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setHome(t, t.TempDir())
 	dir, err := backupDir()
 	if err != nil {
 		t.Fatal(err)
@@ -1081,6 +1111,7 @@ func TestDropdownKeepsARestoredDatabase(t *testing.T) {
 func TestReplaceRefuses(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // Windows' home
 	dir := filepath.Join(home, "pg-backups")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
@@ -1119,7 +1150,7 @@ func TestReplaceRefuses(t *testing.T) {
 }
 
 func TestReplaceButton(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setHome(t, t.TempDir())
 	dir, err := backupDir()
 	if err != nil {
 		t.Fatal(err)
@@ -1387,7 +1418,7 @@ func TestCheck(t *testing.T) {
 }
 
 func TestHistoryTab(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setHome(t, t.TempDir())
 	s := New()
 	t.Cleanup(s.Close)
 	s.service, s.settings.Database = "local", "app"

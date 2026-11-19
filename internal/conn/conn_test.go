@@ -111,51 +111,23 @@ func TestExport(t *testing.T) {
 }
 
 func TestEnsureFile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), ".pgpass")
+	// The folder's made too, as %APPDATA%\postgresql may not be there.
+	path := filepath.Join(t.TempDir(), "postgresql", "pgpass.conf")
 	if err := EnsureFile(path); err != nil {
 		t.Fatal(err)
 	}
-	info, err := os.Stat(path)
-	if err != nil {
+	if _, err := os.Stat(path); err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0o600 {
-		t.Errorf("mode = %v", info.Mode().Perm())
-	}
-
-	// An existing file keeps its content and its mode.
-	if err := os.WriteFile(path, []byte("keep"), 0o640); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chmod(path, 0o640); err != nil {
+	// An existing file keeps what's in it.
+	if err := os.WriteFile(path, []byte("keep"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := EnsureFile(path); err != nil {
 		t.Fatal(err)
 	}
-	got, _ := os.ReadFile(path)
-	info, _ = os.Stat(path)
-	if string(got) != "keep" || info.Mode().Perm() != 0o640 {
-		t.Errorf("file changed: %q, %v", got, info.Mode().Perm())
-	}
-}
-
-func TestExposedPassFile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "pgpass")
-	t.Setenv("PGPASSFILE", path)
-	if got := ExposedPassFile(); got != "" {
-		t.Errorf("missing file: %q", got)
-	}
-	if err := os.WriteFile(path, nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	for mode, want := range map[os.FileMode]string{0o600: "", 0o400: "", 0o640: path, 0o644: path, 0o604: path} {
-		if err := os.Chmod(path, mode); err != nil {
-			t.Fatal(err)
-		}
-		if got := ExposedPassFile(); got != want {
-			t.Errorf("%o: got %q, want %q", mode, got, want)
-		}
+	if got, _ := os.ReadFile(path); string(got) != "keep" {
+		t.Errorf("file changed: %q", got)
 	}
 }
 

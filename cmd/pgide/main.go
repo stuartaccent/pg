@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -24,9 +25,13 @@ import (
 //go:embed icon.png
 var icon []byte
 
-// version is the release this was built as, set by scripts/bundle.sh. Builds
-// left at "dev" don't update themselves.
+// version is the release this was built as, set by scripts/bundle.sh or
+// scripts/build-windows.ps1. Builds left at "dev" don't update themselves.
 var version = "dev"
+
+// repository is the GitHub repository whose releases updates come from. A
+// fork's release workflow sets its own, so its builds follow its releases.
+var repository = "stuartaccent/pg"
 
 // The page's background, so a window has no white flash while it loads.
 var (
@@ -115,6 +120,8 @@ func main() {
 			MinHeight:        600,
 			BackgroundColour: background,
 			URL:              "/",
+			// Windows puts the menu in each window, and only if asked.
+			UseApplicationMenu: true,
 		})
 		// Closing the last window quits, and by the time that's asked the window
 		// has gone, so it has to be stopped here.
@@ -156,7 +163,7 @@ func askToQuit(app *application.App, job string, open int, quitting, asking *ato
 // initUpdater points the updater at the GitHub releases, reporting whether it
 // could.
 func initUpdater(app *application.App) bool {
-	gh, err := github.New(github.Config{Repository: "stuartaccent/pg", ChecksumAsset: "SHA256SUMS"})
+	gh, err := github.New(github.Config{Repository: repository, ChecksumAsset: "SHA256SUMS"})
 	if err == nil {
 		err = app.Updater.Init(updater.Config{
 			CurrentVersion: version,
@@ -205,6 +212,10 @@ func appMenu(app *application.App, updates bool) *application.Menu {
 	add("Activity", "", "showActivity")
 	add("Health", "", "showHealth")
 	add("Backups", "", "showBackups")
+	if runtime.GOOS != "darwin" { // where the app menu, which has Quit, is
+		file.AddSeparator()
+		file.AddRole(application.Quit)
+	}
 	menu.AddRole(application.EditMenu)
 	menu.AddRole(application.ViewMenu)
 	menu.AddRole(application.WindowMenu)

@@ -1,10 +1,10 @@
 # pg
 
-A personal Postgres IDE: Wails v3 window, templ + HTMX UI, pgx underneath.
+A personal Postgres IDE: Wails v3 window, templ + HTMX UI, pgx underneath. It runs on macOS and Windows.
 
 ![pg showing a table in the browser tree, a query and its results](docs/screenshot.png)
 
-Connections come from `~/.pg_service.conf` (or `$PGSERVICEFILE`), passwords from `~/.pgpass`, so the app stores no credentials of its own.
+Connections come from `~/.pg_service.conf` (or `$PGSERVICEFILE`), passwords from `~/.pgpass`, so the app stores no credentials of its own. On Windows they're where libpq looks: `%APPDATA%\postgresql\.pg_service.conf` and `%APPDATA%\postgresql\pgpass.conf`. Config in the app makes them, folder and all, and opens them in Notepad.
 
 ```ini
 # ~/.pg_service.conf
@@ -18,7 +18,7 @@ user=postgres
 localhost:5432:*:postgres:password
 ```
 
-Postgres ignores `.pgpass` unless only you can read it, so run `chmod 600 ~/.pgpass` after making it. pg warns if it's readable by others.
+Postgres ignores `.pgpass` unless only you can read it, so run `chmod 600 ~/.pgpass` after making it. pg warns if it's readable by others. Windows has no such rule, as `%APPDATA%` is already yours alone.
 
 To make a service read-only, for production say, add this line to it. pg shows a badge when it's on. It's a safety net rather than a lock, as `set default_transaction_read_only = off` turns it back off (Postgres 14 or later is needed for the badge).
 
@@ -43,9 +43,21 @@ cp -R dist/pg.app /Applications
 
 It keeps its own tabs and settings, separate from `go run`. History is shared by both.
 
+### Windows
+
+pg needs Microsoft Edge WebView2, which Windows 10 and 11 already have, and cgo needs gcc, as pg_query is C. MSYS2's is the simplest: install [MSYS2](https://www.msys2.org), run `pacman -S mingw-w64-ucrt-x86_64-gcc` in its UCRT64 shell, and add `C:\msys64\ucrt64\bin` to your PATH.
+
+```powershell
+go run ./cmd/pgide                                     # the desktop app, with a console window behind it
+scripts\build-windows.ps1                              # builds dist\pg.exe, with its icon and no console
+scripts\build-windows.ps1 -Installer                   # and dist\pg-setup.exe, which needs NSIS (winget install NSIS.NSIS)
+```
+
+The installer is per-user: it puts pg in `%LOCALAPPDATA%\Programs\pg` and adds it to the Start menu, without asking for admin rights, so updates can replace it in place. Backups and sandboxes need Docker Desktop. psql's tab uses your own psql if it's new enough, from the PATH or the EDB installer's `C:\Program Files\PostgreSQL\<version>\bin`, and otherwise the server's image in Docker, as on a Mac.
+
 ## Releases
 
-Pushing a tag builds `pg-darwin-arm64.zip` on GitHub Actions and attaches it to a release:
+Pushing a tag builds `pg-darwin-arm64.zip`, `pg-windows-amd64.zip` and `pg-windows-amd64-installer.exe` on GitHub Actions and attaches them to a release:
 
 ```sh
 git tag v0.1.0 && git push --tags
@@ -54,6 +66,10 @@ git tag v0.1.0 && git push --tags
 A release build checks for a newer release on launch and once a day, and has Help › Check for Updates…. Builds made locally report version `dev` and never update.
 
 The build is signed ad hoc rather than with a Developer ID, so macOS blocks it the first time. After unzipping it into `/Applications`, open it once from System Settings › Privacy & Security › Open Anyway, or run `xattr -dr com.apple.quarantine /Applications/pg.app`. Updates install without that step.
+
+On Windows, run the installer. It isn't code-signed, so SmartScreen warns the first time: choose More info › Run anyway. The app updates from the zip, which holds just `pg.exe`.
+
+A build updates from the repository whose workflow built it, so a fork's releases update its own builds.
 
 ## Work on the UI
 
@@ -69,7 +85,7 @@ The SQL editor is CodeMirror 6, bundled from `web/js/app.js` into `web/static/ap
 npm ci && npm run build && npm test
 ```
 
-Styling is daisyUI 5.7.46 (vendored as `web/css/daisyui.mjs`) on the Tailwind standalone CLI. `web/static/app.css` is generated, so edit `web/css/app.css` instead. The CLI isn't kept in the repo; on Apple silicon, fetch it once with:
+Styling is daisyUI 5.7.46 (vendored as `web/css/daisyui.mjs`) on the Tailwind standalone CLI. `web/static/app.css` is generated, so edit `web/css/app.css` instead. The CLI isn't kept in the repo; `task tailwind` fetches the one for your system, or on Apple silicon, by hand:
 
 ```sh
 mkdir -p tmp && curl -fsSLo tmp/tailwindcss https://github.com/tailwindlabs/tailwindcss/releases/download/v4.3.3/tailwindcss-macos-arm64 && chmod +x tmp/tailwindcss
@@ -86,7 +102,7 @@ npm test
 
 ## Using it
 
-- ⌘Enter runs the selection, or the whole editor if nothing's selected. So do Explain, Analyze and Export CSV.
+- ⌘Enter (Ctrl+Enter on Windows) runs the selection, or the whole editor if nothing's selected. So do Explain, Analyze and Export CSV.
 - Several statements show one result after another, each with its own row count. Later ones load as you scroll to them, as a long first result does. Statements sent together are one transaction, so if one fails, those before it are rolled back even though their results stay on screen.
 - `:name` in a query asks for a value before running, offering the last one used. Values go in as quoted text, so `where id = :id` becomes `where id = '42'`, and typing NULL sends a null. They can't stand in for table or column names. History keeps the `:name`.
 - Explain and Analyze show the plan as a tree, each step with a bar for its share of the time, or of the cost if it wasn't run. The slowest step's bar is amber, and row estimates out by 10 times or more are flagged. Click a step for its other details, or use Copy JSON for the raw plan. An `explain` typed into the editor still shows as text.
@@ -106,11 +122,12 @@ npm test
 - Click a result cell to read all of it, format JSON and copy it. Copy row copies the row as a JSON object keyed by column name. Update cell and Update row write an `update` for that row in a new tab, to edit and run. It's keyed on the table's primary key, so the results have to include it.
 - Export CSV asks where to save in the app, and saves to `~/Downloads` in a browser. It runs the query again, on a connection of its own with the tab's search_path, in a read-only transaction: one that writes is refused, and changes the tab hasn't committed aren't in it. Until it's finished, the file's name ends `.partial`.
 - Tabs' SQL, the last service and pane sizes are kept in the webview's `localStorage`.
-- History records every run, in SQLite at `~/Library/Application Support/pg/history.db`. Runs of the same query, whatever its values or layout, make one entry showing the newest text, with every run's time, service and database. Star an entry to keep it first and through clearing, and add a note to find it by.
+- History records every run, in SQLite at `~/Library/Application Support/pg/history.db`, or `%APPDATA%\pg\history.db` on Windows. Runs of the same query, whatever its values or layout, make one entry showing the newest text, with every run's time, service and database. Star an entry to keep it first and through clearing, and add a note to find it by.
 
 ## Layout
 
 - `cmd/pgide` — Wails window around `web.Handler`
+- `internal/term` — the psql tab's terminal: a pty, or ConPTY on Windows
 - `cmd/dev` — same handler on localhost for a normal browser
 - `internal/conn` — list services, connect (cancel keeps the connection alive)
 - `internal/session` — one connection, run / page / explain / cancel; each query tab has its own

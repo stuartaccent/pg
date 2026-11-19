@@ -9,6 +9,7 @@ require (
 	github.com/jackc/pgx/v5 v5.13.0
 	github.com/pganalyze/pg_query_go/v6 v6.2.5
 	github.com/wailsapp/wails/v3 v3.1.0
+	golang.org/x/sys v0.50.0
 	modernc.org/sqlite v1.62.0
 )
 
@@ -34,7 +35,6 @@ require (
 	golang.org/x/mod v0.43.0 // indirect
 	golang.org/x/net v0.62.0 // indirect
 	golang.org/x/sync v0.25.0 // indirect
-	golang.org/x/sys v0.50.0 // indirect
 	golang.org/x/term v0.48.0 // indirect
 	golang.org/x/text v0.44.0 // indirect
 	golang.org/x/tools v0.52.0 // indirect

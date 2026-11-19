@@ -8,7 +8,7 @@ permissions:
   contents: write
 
 jobs:
-  release:
+  macos:
     runs-on: macos-latest # arm64
     steps:
       - uses: actions/checkout@v7
@@ -16,13 +16,66 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Build pg.app
-        run: VERSION="${GITHUB_REF_NAME#v}" scripts/bundle.sh
+        run: VERSION="${GITHUB_REF_NAME#v}" REPOSITORY="$GITHUB_REPOSITORY" scripts/bundle.sh
       - name: Package
         # ditto keeps the bundle's signature intact, which zip can break.
+        run: ditto -c -k --keepParent dist/pg.app dist/pg-darwin-arm64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: dist/pg-darwin-arm64.zip
+
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      # cgo needs gcc, for pg_query.
+      - uses: msys2/setup-msys2@v2
+        id: msys2
+        with:
+          msystem: UCRT64
+          install: mingw-w64-ucrt-x86_64-gcc
+          path-type: inherit
+      - name: Put gcc on the PATH
+        run: Add-Content $env:GITHUB_PATH "${{ steps.msys2.outputs.msys2-location }}\ucrt64\bin"
+      - name: Install NSIS
         run: |
-          ditto -c -k --keepParent dist/pg.app dist/pg-darwin-arm64.zip
-          cd dist && shasum -a 256 pg-darwin-arm64.zip > SHA256SUMS
+          if (-not (Get-Command makensis -ErrorAction SilentlyContinue) -and -not (Test-Path "${env:ProgramFiles(x86)}\NSIS\makensis.exe")) {
+            choco install nsis -y --no-progress
+          }
+      - name: Build pg.exe and its installer
+        run: scripts\build-windows.ps1 -Installer -Version $env:GITHUB_REF_NAME.TrimStart('v') -Repository $env:GITHUB_REPOSITORY
+      - name: Package
+        # The updater takes the zip, which must hold just the exe. The
+        # installer's name has "-installer." in it so the updater passes over it.
+        run: |
+          Compress-Archive -Path dist\pg.exe -DestinationPath dist\pg-windows-amd64.zip
+          Move-Item dist\pg-setup.exe dist\pg-windows-amd64-installer.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: |
+            dist/pg-windows-amd64.zip
+            dist/pg-windows-amd64-installer.exe
+
+  publish:
+    needs: [macos, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        run: cd dist && sha256sum * > SHA256SUMS
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/pg-darwin-arm64.zip dist/SHA256SUMS --generate-notes
+        run: gh release create "$GITHUB_REF_NAME" dist/* --generate-notes

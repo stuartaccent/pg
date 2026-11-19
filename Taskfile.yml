@@ -1,5 +1,10 @@
 version: '3'
 
+vars:
+  # The Tailwind standalone CLI, fetched into tmp for this system.
+  TAILWIND: tmp/tailwindcss{{exeExt}}
+  TAILWIND_ASSET: tailwindcss-{{if eq OS "darwin"}}macos{{else}}{{OS}}{{end}}-{{if eq ARCH "amd64"}}x64{{else}}{{ARCH}}{{end}}{{exeExt}}
+
 tasks:
   run:
     desc: Run the desktop app
@@ -7,9 +12,18 @@ tasks:
       - go run ./cmd/pgide
 
   bundle:
-    desc: Build dist/pg.app
+    desc: Build dist/pg.app on macOS, or dist/pg.exe on Windows
     cmds:
-      - scripts/bundle.sh
+      - cmd: scripts/bundle.sh
+        platforms: [darwin]
+      - cmd: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-windows.ps1
+        platforms: [windows]
+
+  installer:
+    desc: Build dist/pg.exe and its installer on Windows (needs NSIS)
+    platforms: [windows]
+    cmds:
+      - powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-windows.ps1 -Installer
 
   dev:
     desc: Serve the UI on http://127.0.0.1:8080, regenerating templ and CSS as they change
@@ -29,7 +43,7 @@ tasks:
   css-watch:
     internal: true
     cmds:
-      - tmp/tailwindcss -i web/css/app.css -o web/static/app.css --minify --watch=always
+      - '{{.TAILWIND}} -i web/css/app.css -o web/static/app.css --minify --watch=always'
 
   serve:
     internal: true
@@ -41,7 +55,7 @@ tasks:
     deps: [tailwind]
     cmds:
       - go tool templ generate
-      - tmp/tailwindcss -i web/css/app.css -o web/static/app.css --minify
+      - '{{.TAILWIND}} -i web/css/app.css -o web/static/app.css --minify'
       - npm ci
       - npm run build
 
@@ -54,8 +68,9 @@ tasks:
   tailwind:
     desc: Fetch the Tailwind standalone CLI into tmp
     status:
-      - test -x tmp/tailwindcss
+      - test -f {{.TAILWIND}}
     cmds:
       - mkdir -p tmp
-      - curl -fsSLo tmp/tailwindcss https://github.com/tailwindlabs/tailwindcss/releases/download/v4.3.3/tailwindcss-macos-arm64
-      - chmod +x tmp/tailwindcss
+      - curl -fsSLo {{.TAILWIND}} https://github.com/tailwindlabs/tailwindcss/releases/download/v4.3.3/{{.TAILWIND_ASSET}}
+      - cmd: chmod +x {{.TAILWIND}}
+        platforms: [darwin, linux]

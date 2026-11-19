@@ -8,21 +8,18 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"os"
-	"os/exec"
 	"strconv"
 	"time"
-
-	"github.com/creack/pty"
 
 	"pg/internal/catalog"
 	"pg/internal/conn"
 	"pg/internal/dockerpg"
+	"pg/internal/term"
 )
 
 // psqlTerm is psql running on a pseudo-terminal, for the psql tab.
 type psqlTerm struct {
-	pty    *os.File
+	pty    term.Term
 	out    chan []byte        // what psql writes; closed when it exits
 	done   chan struct{}      // closed when psql, or docker, has exited
 	cancel context.CancelFunc // stops psql, and any container with it
@@ -32,14 +29,14 @@ type psqlTerm struct {
 // startPsql starts psql on a pseudo-terminal, with a notice of why it's in
 // Docker if that's not the user's choice. It's a variable for the tests, which
 // have no docker.
-var startPsql = func(ctx context.Context, s conn.Settings, readOnly bool, image, dir string) (*os.File, *exec.Cmd, string, error) {
+var startPsql = func(ctx context.Context, s conn.Settings, readOnly bool, image, dir string) (term.Term, string, error) {
 	cmd, notice := dockerpg.Psql(ctx, s, readOnly, image, dir)
-	f, err := pty.Start(cmd)
-	return f, cmd, notice, err
+	t, err := term.Start(ctx, cmd)
+	return t, notice, err
 }
 
 // openPsql starts psql on the current connection, database and all, unless
-// it's already running. It's the Mac's own psql if that's new enough for the
+// it's already running. It's the computer's own psql if that's new enough for the
 // server, or else the server's own Postgres image.
 func (s *Server) openPsql(w http.ResponseWriter, r *http.Request) {
 	dir, err := queryDir()
@@ -59,15 +56,14 @@ func (s *Server) openPsql(w http.ResponseWriter, r *http.Request) {
 	}
 	if err == nil {
 		ctx, cancel := context.WithCancel(context.Background())
-		var f *os.File
-		var cmd *exec.Cmd
+		var pty term.Term
 		var notice string
-		if f, cmd, notice, err = startPsql(ctx, s.settings, s.readOnly, s.image, dir); err != nil {
+		if pty, notice, err = startPsql(ctx, s.settings, s.readOnly, s.image, dir); err != nil {
 			cancel()
 		} else {
-			s.term = &psqlTerm{pty: f, out: make(chan []byte), done: make(chan struct{}), cancel: cancel, notice: notice}
+			s.term = &psqlTerm{pty: pty, out: make(chan []byte), done: make(chan struct{}), cancel: cancel, notice: notice}
 			go s.term.pump(ctx)
-			go func(t *psqlTerm) { _ = cmd.Wait(); close(t.done) }(s.term)
+			go func(t *psqlTerm) { _ = t.pty.Wait(); close(t.done) }(s.term)
 		}
 	}
 	if err != nil {
@@ -99,7 +95,7 @@ func (t *psqlTerm) pump(ctx context.Context) {
 				return
 			}
 		}
-		if err != nil { // EIO once psql has exited
+		if err != nil { // EIO once psql has exited, or EOF on Windows
 			return
 		}
 	}
@@ -158,7 +154,7 @@ func (s *Server) psqlSize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if t := s.psql(); t != nil {
-		_ = pty.Setsize(t.pty, &pty.Winsize{Cols: uint16(cols), Rows: uint16(rows)})
+		_ = t.pty.Resize(uint16(cols), uint16(rows))
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

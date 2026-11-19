@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  # The generated views have to match their templates.
+  templ:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - run: go tool templ generate
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: templ-generated
+          path: web/*_templ.go
+      - name: Check they're up to date
+        run: git diff --exit-code -- web
+
+  # The Unix side, as on macOS, on runners that are rarely short.
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      # Less the window, which Wails would build with GTK here: Linux isn't a
+      # platform pg ships for, and macOS and Windows build it.
+      - run: go test $(go list ./... | grep -v /cmd/pgide)
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - run: go vet ./...
+      - run: go test ./...
+      - run: npm ci && npm test
+
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      # cgo needs gcc, for pg_query.
+      - uses: msys2/setup-msys2@v2
+        id: msys2
+        with:
+          msystem: UCRT64
+          install: mingw-w64-ucrt-x86_64-gcc
+          path-type: inherit
+      - name: Put gcc on the PATH
+        run: Add-Content $env:GITHUB_PATH "${{ steps.msys2.outputs.msys2-location }}\ucrt64\bin"
+      - run: go vet ./...
+      - run: go test ./...
+      - name: Install NSIS
+        run: |
+          if (-not (Get-Command makensis -ErrorAction SilentlyContinue) -and -not (Test-Path "${env:ProgramFiles(x86)}\NSIS\makensis.exe")) {
+            choco install nsis -y --no-progress
+          }
+      - name: Build pg.exe and its installer
+        run: scripts\build-windows.ps1 -Installer
+      - name: Check pg.exe needs no DLLs beyond Windows' own
+        run: |
+          $dlls = objdump -p dist\pg.exe | Select-String 'DLL Name: (.+)' | ForEach-Object { $_.Matches[0].Groups[1].Value }
+          $dlls
+          $extra = $dlls | Where-Object { $_ -match '^(libgcc|libwinpthread|libstdc|libssp)' }
+          if ($extra) { throw "pg.exe needs MinGW's DLLs: $extra" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pg-windows-amd64
+          path: |
+            dist/pg.exe
+            dist/pg-setup.exe

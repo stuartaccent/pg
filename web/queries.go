@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 )
@@ -53,7 +54,7 @@ func listQueries(dir string) ([]string, error) {
 		case strings.HasPrefix(d.Name(), "."):
 			return nil
 		}
-		if name, ok := strings.CutSuffix(strings.TrimPrefix(path, dir+"/"), ".sql"); ok && d.Type().IsRegular() {
+		if name, ok := strings.CutSuffix(relativeName(dir, path), ".sql"); ok && d.Type().IsRegular() {
 			names = append(names, name)
 		}
 		return nil
@@ -68,7 +69,12 @@ func listQueries(dir string) ([]string, error) {
 // queryPath returns the path of the query called name, which can be in a
 // subfolder but has to stay inside the folder. Ruling out parts that are empty
 // or start with a dot rules out .. and absolute paths along with hidden files.
+// Names always use /, so on Windows a \ or a drive's : is ruled out too, as
+// either could reach outside.
 func queryPath(name string) (string, error) {
+	if runtime.GOOS == "windows" && strings.ContainsAny(name, `\:`) {
+		return "", errors.New(`names and folders can't have \ or : in them`)
+	}
 	for part := range strings.SplitSeq(name, "/") {
 		if part == "" || strings.HasPrefix(part, ".") {
 			return "", errors.New("names and folders can't be empty or start with a dot")
@@ -187,10 +193,20 @@ func (s *Server) chooseQuery(w http.ResponseWriter, r *http.Request) {
 // queryName is how a tab refers to the query at path: its name if it's in the
 // folder, otherwise the whole path, which Save won't offer again.
 func queryName(root, path string) string {
-	if inside, ok := strings.CutPrefix(strings.TrimSuffix(path, ".sql"), root+"/"); ok {
+	if inside := relativeName(root, strings.TrimSuffix(path, ".sql")); inside != "" {
 		return inside
 	}
 	return path
+}
+
+// relativeName is path relative to dir with / between its parts, as a query's
+// name has on every system, or "" if it isn't inside dir.
+func relativeName(dir, path string) string {
+	rel, err := filepath.Rel(dir, path)
+	if err != nil || rel == "." || !filepath.IsLocal(rel) {
+		return ""
+	}
+	return filepath.ToSlash(rel)
 }
 
 // pickQuery reads a file chosen with the Open dialog, from anywhere, and

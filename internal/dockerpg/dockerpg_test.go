@@ -2,11 +2,11 @@ package dockerpg
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -859,14 +859,11 @@ func fakePsql(t *testing.T, version int) string {
 	old := psqlDirs
 	psqlDirs = ""
 	t.Cleanup(func() { psqlDirs = old })
-	path := filepath.Join(dir, "psql")
-	if version > 0 {
-		script := fmt.Sprintf("#!/bin/sh\necho 'psql (PostgreSQL) %d.2 (Homebrew)'\n", version)
-		if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
-			t.Fatal(err)
-		}
+	if version == 0 {
+		return filepath.Join(dir, "psql"+exe)
 	}
-	return path
+	t.Setenv("FAKE_PSQL_VERSION", strconv.Itoa(version))
+	return installFake(t, dir, "psql")
 }
 
 func TestPsql(t *testing.T) {
@@ -898,7 +895,7 @@ func TestPsql(t *testing.T) {
 	// Docker's, with a notice, as the Mac's is older than the server.
 	path = fakePsql(t, 14)
 	cmd, notice = Psql(t.Context(), settings, false, "postgres:18", "/Users/me/pg-queries")
-	args := strings.Join(cmd.Args[1:], " ")
+	args := strings.Join(withoutName(cmd.Args[1:]), " ")
 	want := "run --rm -it --init -e PGHOST -e PGPORT -e PGUSER -e PGPASSWORD -e PGDATABASE -v /Users/me/pg-queries:/queries:ro -w /queries postgres:18 psql"
 	if args != want {
 		t.Errorf("args = %s\nwant %s", args, want)
@@ -932,55 +929,7 @@ func TestDump(t *testing.T) {
 	old := psqlDirs
 	psqlDirs = ""
 	t.Cleanup(func() { psqlDirs = old })
-	// pg_dump 18's output, much shortened. It notes how it was run in ran.
-	script := `#!/bin/sh
-[ "$1" = --version ] && { echo 'pg_dump (PostgreSQL) 18.1'; exit; }
-echo "$* $PGHOST $PGPASSWORD $PGSERVICE" > "${0%/*}/ran"
-[ "$3" = --table=none ] && { printf -- '--\n-- PostgreSQL database dump\n--\n\nSET statement_timeout = 0;\n'; exit; }
-/bin/cat <<'END'
---
--- PostgreSQL database dump
---
-
-\restrict abc
-
-SET statement_timeout = 0;
-SELECT pg_catalog.set_config('search_path', '', false);
-
---
--- Name: t; Type: TABLE; Schema: public; Owner: postgres
---
-
-CREATE TABLE public.t (
-    id integer,
-    status text DEFAULT 'draft
--- not yet sent
-
-SET by the mailer'::text
-);
-
-
-ALTER TABLE public.t OWNER TO postgres;
-
---
--- Name: TABLE t; Type: COMMENT; Schema: public; Owner: postgres
---
-
-COMMENT ON TABLE public.t IS 'Statuses:
-\restrict
--- draft
-
-
-
-end';
-
-\unrestrict abc
-
-END
-`
-	if err := os.WriteFile(filepath.Join(dir, "pg_dump"), []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	installFake(t, dir, "pg_dump")
 	ddl, err := Dump(t.Context(), settings, "postgres:18", `"public"."t"`)
 	// Strings that span lines come through whole, whatever their lines start with.
 	want := "CREATE TABLE public.t (\n    id integer,\n    status text DEFAULT 'draft\n-- not yet sent\n\nSET by the mailer'::text\n);\n\n" +
@@ -1080,7 +1029,7 @@ func TestRunSurvivesALongLine(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	// 2 MB on one line, more than the scanner takes, and than a pipe holds.
-	cmd := exec.CommandContext(ctx, "sh", "-c", "head -c 2000000 /dev/zero | tr '\\0' x >&2; echo >&2; echo done >&2")
+	cmd := helperCmd(ctx, "long-line")
 	if _, err := run(cmd, func(string) {}); err != nil {
 		t.Fatal(err)
 	}
@@ -1091,24 +1040,25 @@ func TestRunSurvivesALongLine(t *testing.T) {
 
 // pg_restore exits non-zero for skipped errors and real failures alike.
 func TestRunRestoreTellsSkippedFromFailed(t *testing.T) {
-	sh := func(ctx context.Context, script string) *exec.Cmd {
-		return exec.CommandContext(ctx, "sh", "-c", script)
+	// fake writes stderr, sleeps for wait, then exits with code.
+	fake := func(ctx context.Context, stderr string, code int, wait time.Duration) *exec.Cmd {
+		return helperCmd(ctx, "stderr", "DOCKERPG_STDERR="+stderr, "DOCKERPG_EXIT="+strconv.Itoa(code), "DOCKERPG_SLEEP="+wait.String())
 	}
 	quiet := func(string) {}
-	skipped := `echo 'pg_restore: error: could not execute query: ERROR:  role "x" does not exist' >&2; echo 'pg_restore: warning: errors ignored on restore: 2' >&2; exit 1`
+	skipped := "pg_restore: error: could not execute query: ERROR:  role \"x\" does not exist\npg_restore: warning: errors ignored on restore: 2\n"
 
-	got, err := runRestore(context.Background(), sh(context.Background(), skipped), quiet)
+	got, err := runRestore(context.Background(), fake(context.Background(), skipped, 1, 0), quiet)
 	if err != nil || got.Count != 2 || got.First != `role "x" does not exist` {
 		t.Errorf("skipped = %+v, %v", got, err)
 	}
-	if _, err := runRestore(context.Background(), sh(context.Background(), "echo boom >&2; exit 1"), quiet); err == nil {
+	if _, err := runRestore(context.Background(), fake(context.Background(), "boom\n", 1, 0), quiet); err == nil {
 		t.Error("a failure counted as success")
 	}
 	// Stopped after a skipped error is still stopped.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	stopped := `echo 'pg_restore: warning: errors ignored on restore: 1' >&2; sleep 5`
-	if _, err := runRestore(ctx, sh(ctx, stopped), func(string) { cancel() }); err == nil {
+	stopped := "pg_restore: warning: errors ignored on restore: 1\n"
+	if _, err := runRestore(ctx, fake(ctx, stopped, 0, 5*time.Second), func(string) { cancel() }); err == nil {
 		t.Error("a stopped restore counted as success")
 	}
 }

@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"os/exec"
 	"slices"
 	"strconv"
 	"strings"
@@ -314,9 +313,7 @@ func (s *Server) services(w http.ResponseWriter, r *http.Request) {
 }
 
 // openInEditor opens path in the user's text editor. It's a variable for the tests.
-var openInEditor = func(path string) error {
-	return exec.Command("open", "-t", path).Run()
-}
+var openInEditor = editFile
 
 // editConfig hands a config file to the user's text editor. pg deliberately
 // never reads these itself, so passwords don't pass through it.

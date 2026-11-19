@@ -1,6 +1,6 @@
 // Package dockerpg runs Postgres' own tools in Docker, so backups need nothing
 // installed and always use the version that matches the server. psql is the
-// exception: the Mac's own is preferred when it's new enough.
+// exception: the computer's own is preferred when it's new enough.
 package dockerpg
 
 import (
@@ -20,7 +20,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	pg_query "github.com/pganalyze/pg_query_go/v6"
@@ -68,17 +67,13 @@ func ImageForBackup(name string) string {
 	return "postgres:latest"
 }
 
-// dockerDirs are where Docker lands on a Mac. An app opened from the Finder
-// doesn't get the shell's PATH, so these have to be added.
-const dockerDirs = "/usr/local/bin:/opt/homebrew/bin"
-
 // dockerPath finds docker, including in dockerDirs.
 func dockerPath() string {
 	if path, err := exec.LookPath("docker"); err == nil {
 		return path
 	}
-	for dir := range strings.SplitSeq(dockerDirs, ":") {
-		path := filepath.Join(dir, "docker")
+	for _, dir := range dockerDirs {
+		path := filepath.Join(dir, "docker"+exe)
 		if _, err := os.Stat(path); err == nil {
 			return path
 		}
@@ -87,14 +82,16 @@ func dockerPath() string {
 }
 
 // command prepares a docker command. Cancelling asks it to stop rather than
-// killing it, as docker passes on a signal but a killed client leaves its
-// container running.
+// killing it, as a killed client leaves its container running.
 func command(ctx context.Context, env []string, args ...string) *exec.Cmd {
+	args, container := nameContainer(args)
 	cmd := exec.CommandContext(ctx, dockerPath(), args...)
 	// docker runs its credential helper from the PATH, so finding docker isn't enough.
-	cmd.Env = append(append(os.Environ(), "PATH="+os.Getenv("PATH")+":"+dockerDirs), env...)
-	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
+	path := append([]string{os.Getenv("PATH")}, dockerDirs...)
+	cmd.Env = append(append(os.Environ(), "PATH="+strings.Join(path, string(os.PathListSeparator))), env...)
+	cmd.Cancel = stopper(cmd, container)
 	cmd.WaitDelay = 10 * time.Second
+	hideWindow(cmd)
 	return cmd
 }
 
@@ -154,7 +151,7 @@ func containerHost(host string) string {
 // the arguments, so the password stays out of the process list.
 //
 // shortcut: of the ssl settings only sslmode goes, as certificate files are on
-// the Mac, so verify-ca and verify-full fail in a container rather than check
+// the computer, so verify-ca and verify-full fail in a container rather than check
 // less. Mount the files if a service needing them has to use Docker's tools.
 func pgEnv(s conn.Settings) (env, pass []string) {
 	env = slices.DeleteFunc(pgVars(s, containerHost(s.Host)), func(v string) bool {
@@ -220,10 +217,10 @@ const readOnlyOptions = "PGOPTIONS=-c default_transaction_read_only=on"
 // dir. The connection details go in the environment, so the password isn't in
 // the arguments. If readOnly, transactions default to read-only.
 //
-// It's the Mac's own psql if there is one at least as new as the server, which
+// It's the computer's own psql if there is one at least as new as the server, which
 // image is named for, as that can write files and keeps its history and
 // .psqlrc. Otherwise it's the image's, with dir mounted read-only; notice
-// says why if the Mac's psql was too old.
+// says why if the computer's psql was too old.
 func Psql(ctx context.Context, s conn.Settings, readOnly bool, image, dir string) (cmd *exec.Cmd, notice string) {
 	server, _ := strconv.Atoi(strings.TrimPrefix(image, "postgres:")) // 0 for latest, which any psql will do for
 	path, major := hostTool(ctx, "psql")
@@ -238,8 +235,8 @@ func Psql(ctx context.Context, s conn.Settings, readOnly bool, image, dir string
 		return cmd, ""
 	}
 	if path != "" {
-		notice = fmt.Sprintf("%s is psql %d, older than this server's %d, so this is psql %d in Docker, which can't write files on your Mac. Update yours to %d or later to use it here.",
-			path, major, server, server, server)
+		notice = fmt.Sprintf("%s is psql %d, older than this server's %d, so this is psql %d in Docker, which can't write files on your %s. Update yours to %d or later to use it here.",
+			path, major, server, server, computer, server)
 	}
 	env, pass := pgEnv(s)
 	if readOnly {
@@ -249,29 +246,26 @@ func Psql(ctx context.Context, s conn.Settings, readOnly bool, image, dir string
 		"-v", dir+":/queries:ro", "-w", "/queries", image, "psql")...), notice
 }
 
-// psqlDirs are where psql and pg_dump land on a Mac but an app opened from the Finder
-// won't look: Homebrew's libpq, which it doesn't link, its bin, and
-// Postgres.app. A variable for the tests.
-var psqlDirs = "/opt/homebrew/opt/libpq/bin:/opt/homebrew/bin:/usr/local/opt/libpq/bin:/usr/local/bin:/Applications/Postgres.app/Contents/Versions/latest/bin"
-
 var psqlVersion = regexp.MustCompile(`\(PostgreSQL\) (\d+)`)
 
-// hostTool finds the newest of a Postgres tool, such as psql, on the Mac and
+// hostTool finds the newest of a Postgres tool, such as psql, on the computer and
 // its major version, or "" if there's none.
 func hostTool(ctx context.Context, name string) (path string, major int) {
 	var found []string
 	if p, err := exec.LookPath(name); err == nil {
 		found = append(found, p)
 	}
-	for dir := range strings.SplitSeq(psqlDirs, ":") {
-		if p := filepath.Join(dir, name); dir != "" && !slices.Contains(found, p) {
+	for dir := range strings.SplitSeq(psqlDirs, string(os.PathListSeparator)) {
+		if p := filepath.Join(dir, name+exe); dir != "" && !slices.Contains(found, p) {
 			if _, err := os.Stat(p); err == nil {
 				found = append(found, p)
 			}
 		}
 	}
 	for _, p := range found {
-		out, err := exec.CommandContext(ctx, p, "--version").Output()
+		version := exec.CommandContext(ctx, p, "--version")
+		hideWindow(version)
+		out, err := version.Output()
 		if m := psqlVersion.FindSubmatch(out); err == nil && m != nil {
 			if v, _ := strconv.Atoi(string(m[1])); v > major {
 				path, major = p, v
@@ -284,7 +278,7 @@ func hostTool(ctx context.Context, name string) (path string, major int) {
 // Dump returns pg_dump's DDL for the relations on s matching pattern, less
 // the session settings it starts with, which would change those of a query
 // tab that ran it, and the comments it opens each statement with. It's the
-// Mac's own pg_dump if that's at least as new as the server, which image is
+// computer's own pg_dump if that's at least as new as the server, which image is
 // named for, or else the image's.
 func Dump(ctx context.Context, s conn.Settings, image, pattern string) (string, error) {
 	server, _ := strconv.Atoi(strings.TrimPrefix(image, "postgres:"))
@@ -294,6 +288,7 @@ func Dump(ctx context.Context, s conn.Settings, image, pattern string) (string, 
 	if path, major := hostTool(ctx, "pg_dump"); path != "" && major >= server {
 		cmd = exec.CommandContext(ctx, path, args...)
 		cmd.Env = append(hostEnv(), pgVars(s, s.Host)...)
+		hideWindow(cmd)
 	} else {
 		env, pass := pgEnv(s)
 		cmd = command(ctx, env, append(append(append([]string{"run", "--rm", "--init"}, pass...), image, "pg_dump"), args...)...)
@@ -357,7 +352,7 @@ func statements(dump string) (string, error) {
 	return strings.Join(kept, "\n\n"), nil
 }
 
-// hostEnv is pg's own environment for the Mac's psql, less any libpq
+// hostEnv is pg's own environment for the computer's psql, less any libpq
 // variables, as the container's psql gets none either. An app opened from the
 // Finder has no TERM or LANG, which psql needs to edit lines in the terminal.
 func hostEnv() []string {

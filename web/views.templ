@@ -99,7 +99,7 @@ templ Index(services []string, current string, readOnly bool, j jobView, err err
 					<section data-sidebar="queries" class="flex min-h-0 flex-1 flex-col" hidden>
 						<div class="flex h-9 shrink-0 items-center gap-1 pl-3 pr-1">
 							<h2 class="flex-1 text-[11px] font-semibold uppercase tracking-wider text-base-content/50">Saved queries</h2>
-							<button type="button" class="btn btn-square btn-ghost btn-xs" aria-label="Open a query file" title="Open file… (⌘O)" onclick="openQueryFile()"><i data-lucide="folder-open" class="size-3.5"></i></button>
+							<button type="button" class="btn btn-square btn-ghost btn-xs" aria-label="Open a query file" title={ "Open file… (" + shortcut("⌘O") + ")" } onclick="openQueryFile()"><i data-lucide="folder-open" class="size-3.5"></i></button>
 						</div>
 						<div id="queries-body" class="flex-1 min-h-0 overflow-auto"></div>
 					</section>
@@ -120,7 +120,7 @@ templ Index(services []string, current string, readOnly bool, j jobView, err err
 							@toolTab("history", "History", "history")
 							@toolTab("psql", "psql", "square-terminal")
 						</div>
-						<button type="button" class="btn btn-square btn-ghost btn-xs mx-1 self-center" aria-label="New query tab" title="New tab (⌘T)" hx-post="/tabs" hx-target="#panels" hx-swap="beforeend"><i data-lucide="plus" class="size-3.5"></i></button>
+						<button type="button" class="btn btn-square btn-ghost btn-xs mx-1 self-center" aria-label="New query tab" title={ "New tab (" + shortcut("⌘T") + ")" } hx-post="/tabs" hx-target="#panels" hx-swap="beforeend"><i data-lucide="plus" class="size-3.5"></i></button>
 						<button type="button" class="btn btn-square btn-ghost btn-xs ml-auto mr-1 self-center" aria-label="Close all tabs" title="Close all tabs" onclick="closeAllTabs()"><i data-lucide="copy-x" class="size-3.5"></i></button>
 					</div>
 					<div id="panels" class="flex flex-1 min-h-0">
@@ -159,7 +159,7 @@ templ Index(services []string, current string, readOnly bool, j jobView, err err
 					if err != nil {
 						<span class="text-error whitespace-pre-wrap">{ err.Error() }</span>
 					} else if len(services) == 0 {
-						<span class="text-base-content/60">No services found in ~/.pg_service.conf</span>
+						<span class="text-base-content/60">No services found in { serviceFile() }</span>
 					} else if current != "" {
 						@ConnectStatus(current, readOnly, nil)
 					}
@@ -316,7 +316,7 @@ templ tabPanel(id string) {
 		     hx-sync="this:replace" and abort the very request it is cancelling. -->
 		<div class="flex h-10 shrink-0 items-center gap-1 border-b border-base-content/10 px-2">
 			<div class="join mr-1">
-				<button type="submit" form={ "editor-" + id } class="btn btn-primary btn-sm join-item gap-1.5" title="Run (⌘↵), or just the selection">
+				<button type="submit" form={ "editor-" + id } class="btn btn-primary btn-sm join-item gap-1.5" title={ "Run (" + shortcut("⌘↵") + "), or just the selection" }>
 					<i data-lucide="play" class="size-3.5 fill-current"></i>
 					Run
 				</button>
@@ -332,13 +332,13 @@ templ tabPanel(id string) {
 				Stop
 			</button>
 			<div class="mx-1 h-5 w-px bg-base-content/10" aria-hidden="true"></div>
-			<div class="tooltip tooltip-bottom" data-tip="Format (⇧⌘F)">
+			<div class="tooltip tooltip-bottom" data-tip={ "Format (" + shortcut("⇧⌘F") + ")" }>
 				<button type="button" class="btn btn-ghost btn-sm btn-square" aria-label="Format SQL" onclick="formatSQL()"><i data-lucide="align-left" class="size-4"></i></button>
 			</div>
-			<div class="tooltip tooltip-bottom" data-tip="Save query (⌘S)">
+			<div class="tooltip tooltip-bottom" data-tip={ "Save query (" + shortcut("⌘S") + ")" }>
 				<button type="button" class="btn btn-ghost btn-sm btn-square" aria-label="Save query" onclick="saveQuery()"><i data-lucide="save" class="size-4"></i></button>
 			</div>
-			<div class="tooltip tooltip-bottom" data-tip="Open file (⌘O)">
+			<div class="tooltip tooltip-bottom" data-tip={ "Open file (" + shortcut("⌘O") + ")" }>
 				<button type="button" class="btn btn-ghost btn-sm btn-square" aria-label="Open a query file" onclick="openQueryFile()"><i data-lucide="folder-open" class="size-4"></i></button>
 			</div>
 		</div>
@@ -418,7 +418,7 @@ templ QueriesBody(dir string, names []string, err error) {
 			</li>
 		}
 	</ul>
-	<button type="button" class="link link-hover block w-full truncate px-3 py-2 text-left text-[11px] text-base-content/50 cursor-pointer" title="Open in Finder. Anything ending .sql here is listed." hx-post="/queries/open" hx-target="#queries-body">{ dir }</button>
+	<button type="button" class="link link-hover block w-full truncate px-3 py-2 text-left text-[11px] text-base-content/50 cursor-pointer" title={ "Open in " + fileManager + ". Anything ending .sql here is listed." } hx-post="/queries/open" hx-target="#queries-body">{ dir }</button>
 }
 
 // SaveStatus says why a query wasn't saved, offering to replace one of the
@@ -446,7 +446,7 @@ templ ConnectStatus(service string, readOnly bool, err error) {
 	if err != nil {
 		<span class="text-error whitespace-pre-wrap">{ err.Error() }</span>
 		if conn.PasswordRejected(err) {
-			<span class="text-base-content/60 ml-1">Passwords go in ~/.pgpass, as host:port:database:user:password. Use Config to edit it.</span>
+			<span class="text-base-content/60 ml-1">Passwords go in { passFile() }, as host:port:database:user:password. Use Config to edit it.</span>
 		}
 	} else {
 		<span class="inline-flex items-center gap-1.5"><span class="status status-success" aria-hidden="true"></span>Connected to { service }</span>
