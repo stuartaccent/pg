@@ -10,7 +10,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
-	"strings"
 	"syscall"
 	"time"
 
@@ -30,10 +29,7 @@ var dockerDirs = []string{filepath.Join(programFiles(), "Docker", "Docker", "res
 // psqlDirs are where the EDB installer puts psql and pg_dump, one folder per
 // version, which it doesn't add to the PATH unless asked. A variable for the
 // tests.
-var psqlDirs = func() string {
-	dirs, _ := filepath.Glob(filepath.Join(programFiles(), "PostgreSQL", "*", "bin"))
-	return strings.Join(dirs, string(os.PathListSeparator))
-}()
+var psqlDirs, _ = filepath.Glob(filepath.Join(programFiles(), "PostgreSQL", "*", "bin"))
 
 func programFiles() string {
 	if dir := os.Getenv("ProgramFiles"); dir != "" {

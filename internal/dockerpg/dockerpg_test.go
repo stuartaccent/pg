@@ -857,7 +857,7 @@ func fakePsql(t *testing.T, version int) string {
 	dir := t.TempDir()
 	t.Setenv("PATH", dir)
 	old := psqlDirs
-	psqlDirs = ""
+	psqlDirs = nil
 	t.Cleanup(func() { psqlDirs = old })
 	if version == 0 {
 		return filepath.Join(dir, "psql"+exe)
@@ -927,7 +927,7 @@ func TestDump(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("PATH", dir)
 	old := psqlDirs
-	psqlDirs = ""
+	psqlDirs = nil
 	t.Cleanup(func() { psqlDirs = old })
 	installFake(t, dir, "pg_dump")
 	ddl, err := Dump(t.Context(), settings, "postgres:18", `"public"."t"`)

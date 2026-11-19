@@ -20,7 +20,7 @@ var dockerDirs = []string{"/usr/local/bin", "/opt/homebrew/bin"}
 // psqlDirs are where psql and pg_dump land on a Mac but an app opened from the Finder
 // won't look: Homebrew's libpq, which it doesn't link, its bin, and
 // Postgres.app. A variable for the tests.
-var psqlDirs = "/opt/homebrew/opt/libpq/bin:/opt/homebrew/bin:/usr/local/opt/libpq/bin:/usr/local/bin:/Applications/Postgres.app/Contents/Versions/latest/bin"
+var psqlDirs = []string{"/opt/homebrew/opt/libpq/bin", "/opt/homebrew/bin", "/usr/local/opt/libpq/bin", "/usr/local/bin", "/Applications/Postgres.app/Contents/Versions/latest/bin"}
 
 // nameContainer returns docker's arguments as they are: a signal reaches the
 // container through the docker client, so it needn't be named to be stopped.

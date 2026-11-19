@@ -255,8 +255,8 @@ func hostTool(ctx context.Context, name string) (path string, major int) {
 	if p, err := exec.LookPath(name); err == nil {
 		found = append(found, p)
 	}
-	for dir := range strings.SplitSeq(psqlDirs, string(os.PathListSeparator)) {
-		if p := filepath.Join(dir, name+exe); dir != "" && !slices.Contains(found, p) {
+	for _, dir := range psqlDirs {
+		if p := filepath.Join(dir, name+exe); !slices.Contains(found, p) {
 			if _, err := os.Stat(p); err == nil {
 				found = append(found, p)
 			}
