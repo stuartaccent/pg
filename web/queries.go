@@ -93,7 +93,7 @@ func (s *Server) renderQueries(w http.ResponseWriter, r *http.Request, err error
 	if derr == nil {
 		names, derr = listQueries(dir)
 	}
-	render(w, r, QueriesBody(dir, names, errors.Join(err, derr)))
+	render(w, r, QueriesBody(names, errors.Join(err, derr)))
 }
 
 func (s *Server) queries(w http.ResponseWriter, r *http.Request) {
