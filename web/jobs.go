@@ -237,7 +237,7 @@ func (s *Server) renderBackups(w http.ResponseWriter, r *http.Request, err error
 		files, derr = listBackups(dir)
 	}
 	_, sandboxes, _ := serviceList(r.Context())
-	render(w, r, BackupsBody(service, database, canRestore, dir, files, sandboxes, cmp.Or(err, derr)))
+	render(w, r, BackupsBody(service, database, canRestore, files, sandboxes, cmp.Or(err, derr)))
 }
 
 func (s *Server) backups(w http.ResponseWriter, r *http.Request) {

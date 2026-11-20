@@ -32,9 +32,9 @@ templ JobStatus(j jobView) {
 }
 
 // BackupsBody is the Backups tab's content.
-templ BackupsBody(service, database string, canRestore bool, dir string, files []backupFile, sandboxes []dockerpg.Sandbox, err error) {
+templ BackupsBody(service, database string, canRestore bool, files []backupFile, sandboxes []dockerpg.Sandbox, err error) {
 	<div class="flex items-center justify-between gap-2">
-		<h3 class="font-medium">Backups</h3>
+		<h3 class="font-medium flex-1">Backups</h3>
 		if service != "" {
 			<div class="join">
 				<button type="button" class="btn btn-primary btn-sm join-item" hx-post="/backup" hx-target="#job">Back up { service }</button>
@@ -53,11 +53,11 @@ templ BackupsBody(service, database string, canRestore bool, dir string, files [
 		} else {
 			<span class="text-base-content/60 text-sm">Connect to a service to back it up.</span>
 		}
+		<button type="button" class="btn btn-ghost btn-sm btn-square" aria-label={ "Show the backups folder in " + fileManager } title={ "Show in " + fileManager } hx-post="/backups/open" hx-target="#backups-body"><i data-lucide="folder" class="size-4"></i></button>
 	</div>
 	if err != nil {
 		<p class="text-error mt-2">{ err.Error() }</p>
 	}
-	<button type="button" class="link link-hover text-base-content/60 text-xs mt-1 cursor-pointer" title={ "Open in " + fileManager + ". Anything ending .backup here is listed." } hx-post="/backups/open" hx-target="#backups-body">{ dir }</button>
 	if len(files) == 0 {
 		<p class="text-base-content/50 text-sm mt-2">No backups yet.</p>
 	} else {

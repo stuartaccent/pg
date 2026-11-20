@@ -1324,7 +1324,7 @@ func TestSandboxesTable(t *testing.T) {
 		{Name: "pg-sandbox-a1", Source: "shop_db-pg17-20261106-074224-schema.backup", Port: 54012, Password: "ab12"},
 		{Name: "pg-sandbox-b2", Source: "other_app.backup"},
 	}
-	if err := BackupsBody("", "", false, "/tmp", nil, sandboxes, nil).Render(context.Background(), &b); err != nil {
+	if err := BackupsBody("", "", false, nil, sandboxes, nil).Render(context.Background(), &b); err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{"pg-sandbox-a1", ">shop_db", ">pg17<", ">schema<", "6 Nov", "other_app", "/sandboxes/pg-sandbox-b2/remove",
