@@ -165,7 +165,7 @@ templ sandboxConnect(sb dockerpg.Sandbox) {
 templ connectField(name, value string) {
 	<dt class="text-base-content/60">{ name }</dt>
 	<dd class="font-mono truncate select-all" title={ value }>{ value }</dd>
-	<button type="button" class="btn btn-ghost btn-xs" data-copy={ value } onclick="copyFrom(this)" aria-label={ "Copy " + name }>Copy</button>
+	<button type="button" class="btn btn-ghost btn-xs btn-square" data-copy={ value } onclick="copyFrom(this)" aria-label={ "Copy " + name } title="Copy"><i data-lucide="copy" class="size-3.5"></i></button>
 }
 
 // backupMenu is Sandbox's dropdown: a backup's less common actions, including the ones that

@@ -11,7 +11,7 @@ import { formatDialect, postgresql } from "sql-formatter";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import {
-	Activity, AlignLeft, Archive, Bookmark, Box, ChevronDown, Columns3, Copy, CopyX, Database, Download, Eye, FileCode, FileInput,
+	Activity, AlignLeft, Archive, Bookmark, Box, Check, ChevronDown, Columns3, Copy, CopyX, Database, Download, Eye, FileCode, FileInput,
 	FilePen, Folder, FolderOpen, Gauge, Hash, HeartPulse, History, KeyRound, Languages, Layers, ListTree, Play, Plus, Puzzle, RefreshCw, Replace, Save,
 	Search, Server, Settings, Shapes, ShieldCheck, Sigma, Square, SquareFunction, SquareTerminal, Star, SunMoon, Table2, Trash2, User, Users, X, Zap, createIcons,
 } from "lucide";
@@ -31,7 +31,7 @@ const MIN_PANE = 80; // the smallest a dragged pane gets; what's beside it keeps
 // The icons the page uses, bundled so they work offline. The markup asks for
 // one with <i data-lucide="name">; createIcons swaps it for the SVG.
 const icons = {
-	Activity, AlignLeft, Archive, Bookmark, Box, ChevronDown, Columns3, Copy, CopyX, Database, Download, Eye, FileCode, FileInput,
+	Activity, AlignLeft, Archive, Bookmark, Box, Check, ChevronDown, Columns3, Copy, CopyX, Database, Download, Eye, FileCode, FileInput,
 	FilePen, Folder, FolderOpen, Gauge, Hash, HeartPulse, History, KeyRound, Languages, Layers, ListTree, Play, Plus, Puzzle, RefreshCw, Replace, Save,
 	Search, Server, Settings, Shapes, ShieldCheck, Sigma, Square, SquareFunction, SquareTerminal, Star, SunMoon, Table2, Trash2, User, Users, X, Zap,
 };
@@ -635,10 +635,27 @@ async function copy(button, text) {
 		copied = document.execCommand("copy");
 		scratch.remove();
 	}
-	const label = button.textContent;
-	button.textContent = copied ? "Copied" : "Copy failed";
-	setTimeout(() => (button.textContent = label), 1000);
+	// An icon changes in place, so the button keeps its size; text-only buttons say so.
+	const icon = button.querySelector("[data-lucide]");
+	if (icon) {
+		const name = (button.dataset.icon ??= icon.dataset.lucide);
+		setIcon(icon, copied ? "check" : "x");
+		setTimeout(() => setIcon(button.querySelector("[data-lucide]"), name), 1000);
+	} else {
+		const label = (button.dataset.label ??= button.textContent);
+		button.textContent = copied ? "Copied" : "Copy failed";
+		setTimeout(() => (button.textContent = label), 1000);
+	}
 	return copied;
+}
+
+// setIcon swaps a drawn icon for another, keeping its sizing classes.
+function setIcon(icon, name) {
+	const i = document.createElement("i");
+	i.dataset.lucide = name;
+	i.className = [...icon.classList].filter((c) => !c.startsWith("lucide")).join(" ");
+	icon.replaceWith(i);
+	drawIcons(i);
 }
 
 // Tree buttons sit inside a <summary>: preventDefault stops them also toggling it.
