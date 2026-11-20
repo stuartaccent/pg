@@ -62,7 +62,7 @@ func Index(services []string, current string, readOnly bool, j jobView, err erro
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "</nav><aside class=\"flex w-(--sidebar-width) shrink-0 flex-col overflow-hidden bg-base-200\" aria-label=\"Sidebar\"><section data-sidebar=\"tree\" class=\"flex min-h-0 flex-1 flex-col\"><div class=\"flex h-9 shrink-0 items-center gap-1 pl-3 pr-1\"><h2 class=\"flex-1 text-[11px] font-semibold uppercase tracking-wider text-base-content/50\">Explorer</h2><button type=\"button\" class=\"btn btn-square btn-ghost btn-xs\" aria-label=\"Refresh tree\" title=\"Refresh\" hx-get=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "</nav><aside class=\"flex w-(--sidebar-width) shrink-0 flex-col overflow-hidden bg-base-200\" aria-label=\"Sidebar\"><section data-sidebar=\"tree\" class=\"flex min-h-0 flex-1 flex-col\"><div class=\"flex h-9 shrink-0 items-center gap-1 pl-3 pr-1\"><h2 class=\"flex-1 text-[11px] font-semibold uppercase tracking-wider text-base-content/50\">Explorer</h2><button type=\"button\" class=\"btn btn-square btn-ghost btn-sm\" aria-label=\"Refresh tree\" title=\"Refresh\" hx-get=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -75,7 +75,7 @@ func Index(services []string, current string, readOnly bool, j jobView, err erro
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "\" hx-target=\"#tree\" onclick=\"resetTree()\"><i data-lucide=\"refresh-cw\" class=\"size-3.5\"></i></button></div><div class=\"shrink-0 px-2 pb-2\"><label class=\"input input-xs w-full bg-base-100/60 focus-within:outline-1 focus-within:outline-offset-0\"><i data-lucide=\"search\" class=\"size-3 opacity-50\" aria-hidden=\"true\"></i> <input id=\"tree-search\" type=\"search\" name=\"id\" placeholder=\"Search objects…\" aria-label=\"Search objects\" hx-get=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "\" hx-target=\"#tree\" onclick=\"resetTree()\"><i data-lucide=\"refresh-cw\" class=\"size-4\"></i></button></div><div class=\"shrink-0 px-2 pb-2\"><label class=\"input input-xs w-full bg-base-100/60 focus-within:outline-1 focus-within:outline-offset-0\"><i data-lucide=\"search\" class=\"size-3 opacity-50\" aria-hidden=\"true\"></i> <input id=\"tree-search\" type=\"search\" name=\"id\" placeholder=\"Search objects…\" aria-label=\"Search objects\" hx-get=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -101,7 +101,7 @@ func Index(services []string, current string, readOnly bool, j jobView, err erro
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "\" hx-trigger=\"load, connected from:body\"><li class=\"text-base-content/60 px-2\">Choose a service to browse it.</li></ul></section><section data-sidebar=\"queries\" class=\"flex min-h-0 flex-1 flex-col\" hidden><div class=\"flex h-9 shrink-0 items-center gap-1 pl-3 pr-1\"><h2 class=\"flex-1 text-[11px] font-semibold uppercase tracking-wider text-base-content/50\">Saved queries</h2><button type=\"button\" class=\"btn btn-square btn-ghost btn-xs\" aria-label=\"Open a query file\" title=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "\" hx-trigger=\"load, connected from:body\"><li class=\"text-base-content/60 px-2\">Choose a service to browse it.</li></ul></section><section data-sidebar=\"queries\" class=\"flex min-h-0 flex-1 flex-col\" hidden><div class=\"flex h-9 shrink-0 items-center gap-1 pl-3 pr-1\"><h2 class=\"flex-1 text-[11px] font-semibold uppercase tracking-wider text-base-content/50\">Saved queries</h2><button type=\"button\" class=\"btn btn-square btn-ghost btn-sm\" aria-label=\"Open a query file\" title=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -114,7 +114,7 @@ func Index(services []string, current string, readOnly bool, j jobView, err erro
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "\" onclick=\"openQueryFile()\"><i data-lucide=\"folder-open\" class=\"size-3.5\"></i></button> <button type=\"button\" class=\"btn btn-square btn-ghost btn-xs\" aria-label=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "\" onclick=\"openQueryFile()\"><i data-lucide=\"folder-open\" class=\"size-4\"></i></button> <button type=\"button\" class=\"btn btn-square btn-ghost btn-sm\" aria-label=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -140,7 +140,7 @@ func Index(services []string, current string, readOnly bool, j jobView, err erro
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "\" hx-post=\"/queries/open\" hx-target=\"#queries-body\"><i data-lucide=\"folder\" class=\"size-3.5\"></i></button></div><div id=\"queries-body\" class=\"flex-1 min-h-0 overflow-auto\"></div></section></aside><!-- 1px line with a 7px grip. --><div role=\"separator\" aria-orientation=\"vertical\" aria-label=\"Resize the sidebar\" tabindex=\"0\" data-resize=\"width\" class=\"relative z-1 -mx-0.75 w-1.75 shrink-0 cursor-col-resize touch-none before:absolute before:inset-y-0 before:left-0.75 before:w-px before:bg-base-content/10 hover:before:bg-primary focus-visible:outline-none focus-visible:before:bg-primary\"></div><div class=\"flex flex-col flex-1 min-w-0\"><div class=\"flex h-9 shrink-0 border-b border-base-content/10 bg-base-200\"><!-- Never scrolls up and down: tabs are exactly its height. --><div id=\"tabs\" role=\"tablist\" aria-label=\"Query tabs\" class=\"flex min-w-0 overflow-x-auto overflow-y-hidden [scrollbar-width:none]\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "\" hx-post=\"/queries/open\" hx-target=\"#queries-body\"><i data-lucide=\"folder\" class=\"size-4\"></i></button></div><div id=\"queries-body\" class=\"flex-1 min-h-0 overflow-auto\"></div></section></aside><!-- 1px line with a 7px grip. --><div role=\"separator\" aria-orientation=\"vertical\" aria-label=\"Resize the sidebar\" tabindex=\"0\" data-resize=\"width\" class=\"relative z-1 -mx-0.75 w-1.75 shrink-0 cursor-col-resize touch-none before:absolute before:inset-y-0 before:left-0.75 before:w-px before:bg-base-content/10 hover:before:bg-primary focus-visible:outline-none focus-visible:before:bg-primary\"></div><div class=\"flex flex-col flex-1 min-w-0\"><div class=\"flex h-9 shrink-0 border-b border-base-content/10 bg-base-200\"><!-- Never scrolls up and down: tabs are exactly its height. --><div id=\"tabs\" role=\"tablist\" aria-label=\"Query tabs\" class=\"flex min-w-0 overflow-x-auto overflow-y-hidden [scrollbar-width:none]\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -172,7 +172,7 @@ func Index(services []string, current string, readOnly bool, j jobView, err erro
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "</div><button type=\"button\" class=\"btn btn-square btn-ghost btn-xs mx-1 self-center\" aria-label=\"New query tab\" title=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "</div><button type=\"button\" class=\"btn btn-square btn-ghost btn-sm mx-1 self-center\" aria-label=\"New query tab\" title=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -185,7 +185,7 @@ func Index(services []string, current string, readOnly bool, j jobView, err erro
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "\" hx-post=\"/tabs\" hx-target=\"#panels\" hx-swap=\"beforeend\"><i data-lucide=\"plus\" class=\"size-3.5\"></i></button> <button type=\"button\" class=\"btn btn-square btn-ghost btn-xs ml-auto mr-1 self-center\" aria-label=\"Close all tabs\" title=\"Close all tabs\" onclick=\"closeAllTabs()\"><i data-lucide=\"copy-x\" class=\"size-3.5\"></i></button></div><div id=\"panels\" class=\"flex flex-1 min-h-0\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "\" hx-post=\"/tabs\" hx-target=\"#panels\" hx-swap=\"beforeend\"><i data-lucide=\"plus\" class=\"size-4\"></i></button> <button type=\"button\" class=\"btn btn-square btn-ghost btn-sm ml-auto mr-1 self-center\" aria-label=\"Close all tabs\" title=\"Close all tabs\" onclick=\"closeAllTabs()\"><i data-lucide=\"copy-x\" class=\"size-4\"></i></button></div><div id=\"panels\" class=\"flex flex-1 min-h-0\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

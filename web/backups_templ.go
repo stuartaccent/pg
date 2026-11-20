@@ -373,14 +373,14 @@ func BackupsBody(service, database string, canRestore bool, dir string, files []
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "</td><td class=\"text-right whitespace-nowrap\"><button type=\"button\" class=\"btn btn-soft btn-xs\" hx-post=\"/sandboxes\" hx-vals=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "</td><td class=\"text-right whitespace-nowrap\"><div class=\"join\"><button type=\"button\" class=\"btn btn-soft btn-xs join-item\" hx-post=\"/sandboxes\" hx-vals=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var21 string
 				templ_7745c5c3_Var21, templ_7745c5c3_Err = templruntime.NewAttributeExpression(hxVals("file", f.Name)).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 90, Col: 111}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 91, Col: 122}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var21)
 				if templ_7745c5c3_Err != nil {
@@ -394,7 +394,7 @@ func BackupsBody(service, database string, canRestore bool, dir string, files []
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "</td></tr>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "</div></td></tr>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -418,7 +418,7 @@ func BackupsBody(service, database string, canRestore bool, dir string, files []
 				var templ_7745c5c3_Var22 string
 				templ_7745c5c3_Var22, templ_7745c5c3_Err = templruntime.NewAttributeExpression(sb.Source).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 114, Col: 26}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 116, Col: 26}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var22)
 				if templ_7745c5c3_Err != nil {
@@ -431,7 +431,7 @@ func BackupsBody(service, database string, canRestore bool, dir string, files []
 				var templ_7745c5c3_Var23 string
 				templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.JoinStringErrs(sb.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 115, Col: 63}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 117, Col: 63}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var23))
 				if templ_7745c5c3_Err != nil {
@@ -444,7 +444,7 @@ func BackupsBody(service, database string, canRestore bool, dir string, files []
 				var templ_7745c5c3_Var24 string
 				templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.JoinStringErrs(from.Database)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 118, Col: 46}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 120, Col: 46}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var24))
 				if templ_7745c5c3_Err != nil {
@@ -462,7 +462,7 @@ func BackupsBody(service, database string, canRestore bool, dir string, files []
 					var templ_7745c5c3_Var25 string
 					templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.JoinStringErrs(from.Version)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 120, Col: 67}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 122, Col: 67}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var25))
 					if templ_7745c5c3_Err != nil {
@@ -487,7 +487,7 @@ func BackupsBody(service, database string, canRestore bool, dir string, files []
 					var templ_7745c5c3_Var26 string
 					templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.JoinStringErrs(from.Taken())
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 129, Col: 22}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 131, Col: 22}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var26))
 					if templ_7745c5c3_Err != nil {
@@ -509,7 +509,7 @@ func BackupsBody(service, database string, canRestore bool, dir string, files []
 				var templ_7745c5c3_Var27 string
 				templ_7745c5c3_Var27, templ_7745c5c3_Err = templruntime.NewAttributeExpression("/sandboxes/" + sb.Name + "/remove").Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 134, Col: 112}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 136, Col: 112}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var27)
 				if templ_7745c5c3_Err != nil {
@@ -522,7 +522,7 @@ func BackupsBody(service, database string, canRestore bool, dir string, files []
 				var templ_7745c5c3_Var28 string
 				templ_7745c5c3_Var28, templ_7745c5c3_Err = templruntime.NewAttributeExpression("Remove " + sb.Name + " and everything done in it? The backup it came from stays.").Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 134, Col: 238}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 136, Col: 238}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var28)
 				if templ_7745c5c3_Err != nil {
@@ -569,7 +569,7 @@ func sandboxConnect(sb dockerpg.Sandbox) templ.Component {
 		var templ_7745c5c3_Var30 string
 		templ_7745c5c3_Var30, templ_7745c5c3_Err = templruntime.NewAttributeExpression(id).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 147, Col: 69}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 149, Col: 69}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var30)
 		if templ_7745c5c3_Err != nil {
@@ -582,7 +582,7 @@ func sandboxConnect(sb dockerpg.Sandbox) templ.Component {
 		var templ_7745c5c3_Var31 string
 		templ_7745c5c3_Var31, templ_7745c5c3_Err = templruntime.SanitizeStyleAttributeValues(templ.SafeCSS("anchor-name:--" + id))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 147, Col: 116}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 149, Col: 116}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var31))
 		if templ_7745c5c3_Err != nil {
@@ -595,7 +595,7 @@ func sandboxConnect(sb dockerpg.Sandbox) templ.Component {
 		var templ_7745c5c3_Var32 string
 		templ_7745c5c3_Var32, templ_7745c5c3_Err = templruntime.NewAttributeExpression(id).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 148, Col: 21}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 150, Col: 21}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var32)
 		if templ_7745c5c3_Err != nil {
@@ -608,7 +608,7 @@ func sandboxConnect(sb dockerpg.Sandbox) templ.Component {
 		var templ_7745c5c3_Var33 string
 		templ_7745c5c3_Var33, templ_7745c5c3_Err = templruntime.SanitizeStyleAttributeValues(templ.SafeCSS("position-anchor:--" + id))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 148, Col: 72}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 150, Col: 72}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var33))
 		if templ_7745c5c3_Err != nil {
@@ -645,7 +645,7 @@ func sandboxConnect(sb dockerpg.Sandbox) templ.Component {
 		var templ_7745c5c3_Var34 string
 		templ_7745c5c3_Var34, templ_7745c5c3_Err = templruntime.NewAttributeExpression(sb.URL()).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 157, Col: 73}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 159, Col: 73}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var34)
 		if templ_7745c5c3_Err != nil {
@@ -658,7 +658,7 @@ func sandboxConnect(sb dockerpg.Sandbox) templ.Component {
 		var templ_7745c5c3_Var35 string
 		templ_7745c5c3_Var35, templ_7745c5c3_Err = templruntime.NewAttributeExpression(sb.ServiceEntry()).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 158, Col: 82}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 160, Col: 82}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var35)
 		if templ_7745c5c3_Err != nil {
@@ -696,7 +696,7 @@ func connectField(name, value string) templ.Component {
 		var templ_7745c5c3_Var37 string
 		templ_7745c5c3_Var37, templ_7745c5c3_Err = templ.JoinStringErrs(name)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 164, Col: 40}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 166, Col: 40}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var37))
 		if templ_7745c5c3_Err != nil {
@@ -709,7 +709,7 @@ func connectField(name, value string) templ.Component {
 		var templ_7745c5c3_Var38 string
 		templ_7745c5c3_Var38, templ_7745c5c3_Err = templruntime.NewAttributeExpression(value).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 165, Col: 56}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 167, Col: 56}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var38)
 		if templ_7745c5c3_Err != nil {
@@ -722,7 +722,7 @@ func connectField(name, value string) templ.Component {
 		var templ_7745c5c3_Var39 string
 		templ_7745c5c3_Var39, templ_7745c5c3_Err = templ.JoinStringErrs(value)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 165, Col: 66}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 167, Col: 66}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var39))
 		if templ_7745c5c3_Err != nil {
@@ -735,7 +735,7 @@ func connectField(name, value string) templ.Component {
 		var templ_7745c5c3_Var40 string
 		templ_7745c5c3_Var40, templ_7745c5c3_Err = templruntime.NewAttributeExpression(value).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 166, Col: 69}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 168, Col: 69}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var40)
 		if templ_7745c5c3_Err != nil {
@@ -748,7 +748,7 @@ func connectField(name, value string) templ.Component {
 		var templ_7745c5c3_Var41 string
 		templ_7745c5c3_Var41, templ_7745c5c3_Err = templruntime.NewAttributeExpression("Copy " + name).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 166, Col: 124}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 168, Col: 124}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var41)
 		if templ_7745c5c3_Err != nil {
@@ -762,7 +762,7 @@ func connectField(name, value string) templ.Component {
 	})
 }
 
-// backupMenu holds a backup's less common actions, including the ones that
+// backupMenu is Sandbox's dropdown: a backup's less common actions, including the ones that
 // change or delete something, a click away from a slip.
 func backupMenu(id string, f backupFile, service, database string, canRestore bool) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
@@ -781,14 +781,14 @@ func backupMenu(id string, f backupFile, service, database string, canRestore bo
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 67, "<button type=\"button\" class=\"btn btn-ghost btn-xs\" popovertarget=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 67, "<button type=\"button\" class=\"btn btn-soft btn-xs join-item px-1\" popovertarget=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var43 string
 		templ_7745c5c3_Var43, templ_7745c5c3_Err = templruntime.NewAttributeExpression(id).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 172, Col: 70}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 174, Col: 84}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var43)
 		if templ_7745c5c3_Err != nil {
@@ -801,7 +801,7 @@ func backupMenu(id string, f backupFile, service, database string, canRestore bo
 		var templ_7745c5c3_Var44 string
 		templ_7745c5c3_Var44, templ_7745c5c3_Err = templruntime.SanitizeStyleAttributeValues(templ.SafeCSS("anchor-name:--" + id))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 172, Col: 117}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 174, Col: 131}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var44))
 		if templ_7745c5c3_Err != nil {
@@ -814,20 +814,20 @@ func backupMenu(id string, f backupFile, service, database string, canRestore bo
 		var templ_7745c5c3_Var45 string
 		templ_7745c5c3_Var45, templ_7745c5c3_Err = templruntime.NewAttributeExpression("More for " + f.Name).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 172, Col: 153}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 174, Col: 167}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var45)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 70, "\">⋯</button><ul popover id=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 70, "\"><i data-lucide=\"chevron-down\" class=\"size-3.5\"></i></button><ul popover id=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var46 string
 		templ_7745c5c3_Var46, templ_7745c5c3_Err = templruntime.NewAttributeExpression(id).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 173, Col: 20}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 175, Col: 20}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var46)
 		if templ_7745c5c3_Err != nil {
@@ -840,7 +840,7 @@ func backupMenu(id string, f backupFile, service, database string, canRestore bo
 		var templ_7745c5c3_Var47 string
 		templ_7745c5c3_Var47, templ_7745c5c3_Err = templruntime.SanitizeStyleAttributeValues(templ.SafeCSS("position-anchor:--" + id))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 173, Col: 71}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 175, Col: 71}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var47))
 		if templ_7745c5c3_Err != nil {
@@ -853,7 +853,7 @@ func backupMenu(id string, f backupFile, service, database string, canRestore bo
 		var templ_7745c5c3_Var48 string
 		templ_7745c5c3_Var48, templ_7745c5c3_Err = templruntime.NewAttributeExpression(hxVals("file", f.Name)).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 174, Col: 86}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 176, Col: 86}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var48)
 		if templ_7745c5c3_Err != nil {
@@ -871,7 +871,7 @@ func backupMenu(id string, f backupFile, service, database string, canRestore bo
 			var templ_7745c5c3_Var49 string
 			templ_7745c5c3_Var49, templ_7745c5c3_Err = templruntime.NewAttributeExpression(f.Name).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 176, Col: 47}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 178, Col: 47}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var49)
 			if templ_7745c5c3_Err != nil {
@@ -884,7 +884,7 @@ func backupMenu(id string, f backupFile, service, database string, canRestore bo
 			var templ_7745c5c3_Var50 string
 			templ_7745c5c3_Var50, templ_7745c5c3_Err = templruntime.NewAttributeExpression(dockerpg.RestoreName(f.Name, time.Now())).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 176, Col: 102}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 178, Col: 102}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var50)
 			if templ_7745c5c3_Err != nil {
@@ -897,7 +897,7 @@ func backupMenu(id string, f backupFile, service, database string, canRestore bo
 			var templ_7745c5c3_Var51 string
 			templ_7745c5c3_Var51, templ_7745c5c3_Err = templruntime.NewAttributeExpression(service).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 176, Col: 127}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 178, Col: 127}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var51)
 			if templ_7745c5c3_Err != nil {
@@ -915,7 +915,7 @@ func backupMenu(id string, f backupFile, service, database string, canRestore bo
 				var templ_7745c5c3_Var52 string
 				templ_7745c5c3_Var52, templ_7745c5c3_Err = templruntime.NewAttributeExpression(f.Name).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 178, Col: 69}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 180, Col: 69}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var52)
 				if templ_7745c5c3_Err != nil {
@@ -928,7 +928,7 @@ func backupMenu(id string, f backupFile, service, database string, canRestore bo
 				var templ_7745c5c3_Var53 string
 				templ_7745c5c3_Var53, templ_7745c5c3_Err = templruntime.NewAttributeExpression(database).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 178, Col: 96}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 180, Col: 96}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var53)
 				if templ_7745c5c3_Err != nil {
@@ -941,7 +941,7 @@ func backupMenu(id string, f backupFile, service, database string, canRestore bo
 				var templ_7745c5c3_Var54 string
 				templ_7745c5c3_Var54, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprint(!dockerpg.SameDatabase(f.Name, database))).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 178, Col: 164}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 180, Col: 164}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var54)
 				if templ_7745c5c3_Err != nil {
@@ -960,7 +960,7 @@ func backupMenu(id string, f backupFile, service, database string, canRestore bo
 		var templ_7745c5c3_Var55 string
 		templ_7745c5c3_Var55, templ_7745c5c3_Err = templruntime.NewAttributeExpression(hxVals("file", f.Name)).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 181, Col: 105}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 183, Col: 105}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var55)
 		if templ_7745c5c3_Err != nil {
@@ -973,7 +973,7 @@ func backupMenu(id string, f backupFile, service, database string, canRestore bo
 		var templ_7745c5c3_Var56 string
 		templ_7745c5c3_Var56, templ_7745c5c3_Err = templruntime.NewAttributeExpression("Delete " + f.Name + " for good? It won't go to the Trash.").Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 181, Col: 208}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/backups.templ`, Line: 183, Col: 208}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var56)
 		if templ_7745c5c3_Err != nil {

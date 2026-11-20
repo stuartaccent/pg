@@ -87,8 +87,10 @@ templ BackupsBody(service, database string, canRestore bool, dir string, files [
 							<td class="text-xs whitespace-nowrap">{ f.Taken() }</td>
 							<td class="text-xs text-right whitespace-nowrap text-base-content/60">{ f.Size }</td>
 							<td class="text-right whitespace-nowrap">
-								<button type="button" class="btn btn-soft btn-xs" hx-post="/sandboxes" hx-vals={ hxVals("file", f.Name) } hx-target="#job">Sandbox</button>
-								@backupMenu(fmt.Sprintf("backup-menu-%d", i), f, service, database, canRestore)
+								<div class="join">
+									<button type="button" class="btn btn-soft btn-xs join-item" hx-post="/sandboxes" hx-vals={ hxVals("file", f.Name) } hx-target="#job">Sandbox</button>
+									@backupMenu(fmt.Sprintf("backup-menu-%d", i), f, service, database, canRestore)
+								</div>
 							</td>
 						</tr>
 					}
@@ -166,10 +168,10 @@ templ connectField(name, value string) {
 	<button type="button" class="btn btn-ghost btn-xs" data-copy={ value } onclick="copyFrom(this)" aria-label={ "Copy " + name }>Copy</button>
 }
 
-// backupMenu holds a backup's less common actions, including the ones that
+// backupMenu is Sandbox's dropdown: a backup's less common actions, including the ones that
 // change or delete something, a click away from a slip.
 templ backupMenu(id string, f backupFile, service, database string, canRestore bool) {
-	<button type="button" class="btn btn-ghost btn-xs" popovertarget={ id } style={ templ.SafeCSS("anchor-name:--" + id) } aria-label={ "More for " + f.Name }>⋯</button>
+	<button type="button" class="btn btn-soft btn-xs join-item px-1" popovertarget={ id } style={ templ.SafeCSS("anchor-name:--" + id) } aria-label={ "More for " + f.Name }><i data-lucide="chevron-down" class="size-3.5"></i></button>
 	<ul popover id={ id } style={ templ.SafeCSS("position-anchor:--" + id) } class="dropdown dropdown-end menu w-36 rounded-box bg-base-200 shadow-md text-left">
 		<li><button type="button" hx-post="/backups/verify" hx-vals={ hxVals("file", f.Name) } hx-target="#job" onclick="this.closest('[popover]').hidePopover()">Verify</button></li>
 		if canRestore {

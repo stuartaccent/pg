@@ -74,7 +74,7 @@ templ Index(services []string, current string, readOnly bool, j jobView, err err
 					<section data-sidebar="tree" class="flex min-h-0 flex-1 flex-col">
 						<div class="flex h-9 shrink-0 items-center gap-1 pl-3 pr-1">
 							<h2 class="flex-1 text-[11px] font-semibold uppercase tracking-wider text-base-content/50">Explorer</h2>
-							<button type="button" class="btn btn-square btn-ghost btn-xs" aria-label="Refresh tree" title="Refresh" hx-get={ treeURL(catalog.RootKind, "") } hx-target="#tree" onclick="resetTree()"><i data-lucide="refresh-cw" class="size-3.5"></i></button>
+							<button type="button" class="btn btn-square btn-ghost btn-sm" aria-label="Refresh tree" title="Refresh" hx-get={ treeURL(catalog.RootKind, "") } hx-target="#tree" onclick="resetTree()"><i data-lucide="refresh-cw" class="size-4"></i></button>
 						</div>
 						<div class="shrink-0 px-2 pb-2">
 							<label class="input input-xs w-full bg-base-100/60 focus-within:outline-1 focus-within:outline-offset-0">
@@ -99,8 +99,8 @@ templ Index(services []string, current string, readOnly bool, j jobView, err err
 					<section data-sidebar="queries" class="flex min-h-0 flex-1 flex-col" hidden>
 						<div class="flex h-9 shrink-0 items-center gap-1 pl-3 pr-1">
 							<h2 class="flex-1 text-[11px] font-semibold uppercase tracking-wider text-base-content/50">Saved queries</h2>
-							<button type="button" class="btn btn-square btn-ghost btn-xs" aria-label="Open a query file" title={ "Open file… (" + shortcut("⌘O") + ")" } onclick="openQueryFile()"><i data-lucide="folder-open" class="size-3.5"></i></button>
-							<button type="button" class="btn btn-square btn-ghost btn-xs" aria-label={ "Show the queries folder in " + fileManager } title={ "Show in " + fileManager } hx-post="/queries/open" hx-target="#queries-body"><i data-lucide="folder" class="size-3.5"></i></button>
+							<button type="button" class="btn btn-square btn-ghost btn-sm" aria-label="Open a query file" title={ "Open file… (" + shortcut("⌘O") + ")" } onclick="openQueryFile()"><i data-lucide="folder-open" class="size-4"></i></button>
+							<button type="button" class="btn btn-square btn-ghost btn-sm" aria-label={ "Show the queries folder in " + fileManager } title={ "Show in " + fileManager } hx-post="/queries/open" hx-target="#queries-body"><i data-lucide="folder" class="size-4"></i></button>
 						</div>
 						<div id="queries-body" class="flex-1 min-h-0 overflow-auto"></div>
 					</section>
@@ -121,8 +121,8 @@ templ Index(services []string, current string, readOnly bool, j jobView, err err
 							@toolTab("history", "History", "history")
 							@toolTab("psql", "psql", "square-terminal")
 						</div>
-						<button type="button" class="btn btn-square btn-ghost btn-xs mx-1 self-center" aria-label="New query tab" title={ "New tab (" + shortcut("⌘T") + ")" } hx-post="/tabs" hx-target="#panels" hx-swap="beforeend"><i data-lucide="plus" class="size-3.5"></i></button>
-						<button type="button" class="btn btn-square btn-ghost btn-xs ml-auto mr-1 self-center" aria-label="Close all tabs" title="Close all tabs" onclick="closeAllTabs()"><i data-lucide="copy-x" class="size-3.5"></i></button>
+						<button type="button" class="btn btn-square btn-ghost btn-sm mx-1 self-center" aria-label="New query tab" title={ "New tab (" + shortcut("⌘T") + ")" } hx-post="/tabs" hx-target="#panels" hx-swap="beforeend"><i data-lucide="plus" class="size-4"></i></button>
+						<button type="button" class="btn btn-square btn-ghost btn-sm ml-auto mr-1 self-center" aria-label="Close all tabs" title="Close all tabs" onclick="closeAllTabs()"><i data-lucide="copy-x" class="size-4"></i></button>
 					</div>
 					<div id="panels" class="flex flex-1 min-h-0">
 						@tabPanel("1")
