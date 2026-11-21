@@ -220,7 +220,7 @@ const readOnlyOptions = "PGOPTIONS=-c default_transaction_read_only=on"
 // It's the computer's own psql if there is one at least as new as the server, which
 // image is named for, as that can write files and keeps its history and
 // .psqlrc. Otherwise it's the image's, with dir mounted read-only; notice
-// says why if the computer's psql was too old.
+// says why: the computer's psql was too old, or there's none.
 func Psql(ctx context.Context, s conn.Settings, readOnly bool, image, dir string) (cmd *exec.Cmd, notice string) {
 	server, _ := strconv.Atoi(strings.TrimPrefix(image, "postgres:")) // 0 for latest, which any psql will do for
 	path, major := hostTool(ctx, "psql")
@@ -237,6 +237,10 @@ func Psql(ctx context.Context, s conn.Settings, readOnly bool, image, dir string
 	if path != "" {
 		notice = fmt.Sprintf("%s is psql %d, older than this server's %d, so this is psql %d in Docker, which can't write files on your %s. Update yours to %d or later to use it here.",
 			path, major, server, server, computer, server)
+	} else {
+		// Said, so it's clear when psql is in Docker rather than the computer's own.
+		notice = fmt.Sprintf("There's no psql on your %s, so this is psql in Docker, which can't write files on your %s. Install psql to use your own here.",
+			computer, computer)
 	}
 	env, pass := pgEnv(s)
 	if readOnly {

@@ -914,9 +914,9 @@ func TestPsql(t *testing.T) {
 		t.Errorf("read-only service not passed on: %v, %v", cmd.Args, cmd.Env)
 	}
 
-	// Docker's without a word when there's no psql to update.
+	// Docker's, saying there's no psql of its own.
 	fakePsql(t, 0)
-	if cmd, notice = Psql(t.Context(), settings, false, "postgres:18", "/Users/me/pg-queries"); cmd.Args[1] != "run" || notice != "" {
+	if cmd, notice = Psql(t.Context(), settings, false, "postgres:18", "/Users/me/pg-queries"); cmd.Args[1] != "run" || !strings.Contains(notice, "There's no psql on your") {
 		t.Errorf("no host psql = %v, notice %q", cmd.Args, notice)
 	}
 }
