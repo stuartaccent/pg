@@ -15,7 +15,6 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"pg/internal/conn"
 )
 
 const (
@@ -661,13 +660,12 @@ func (c *Catalog) read(ctx context.Context, sql string, params [][]byte) ([][][]
 
 // query is read, keeping the column names.
 func (c *Catalog) query(ctx context.Context, sql string, params [][]byte) (*pgconn.Result, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if err := c.open(ctx); err != nil {
-		return nil, err
-	}
-	res := c.conn.ExecParams(ctx, sql, params, nil, nil, nil).Read()
-	return res, res.Err
+	var res *pgconn.Result
+	err := c.retry(ctx, func() error {
+		res = c.conn.ExecParams(ctx, sql, params, nil, nil, nil).Read()
+		return res.Err
+	})
+	return res, err
 }
 
 // readQualified is read with search_path empty, as pg_dump has it, so the
@@ -675,25 +673,44 @@ func (c *Catalog) query(ctx context.Context, sql string, params [][]byte) (*pgco
 // and the SQL means the same whatever path it's run on. Only for this query,
 // as Completions works from the connection's own.
 func (c *Catalog) readQualified(ctx context.Context, sql string, params [][]byte) ([][][]byte, error) {
+	var rows [][][]byte
+	err := c.retry(ctx, func() error {
+		defer func() { _, _ = c.conn.Exec(context.WithoutCancel(ctx), "rollback").ReadAll() }()
+		if _, err := c.conn.Exec(ctx, "begin read only; set local search_path = ''").ReadAll(); err != nil {
+			return err
+		}
+		res := c.conn.ExecParams(ctx, sql, params, nil, nil, nil).Read()
+		rows = res.Rows
+		return res.Err
+	})
+	return rows, err
+}
+
+// retry runs f on the catalog's connection, opening it if need be. A connection
+// that was ended, by a restart say, looks fine until used, so rather than ask
+// the server first, which doubles every read's round trips, f runs again on a
+// fresh one if the old one turns out to be gone. It only reads, so that's safe.
+func (c *Catalog) retry(ctx context.Context, f func() error) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if err := c.open(ctx); err != nil {
-		return nil, err
+		return err
 	}
-	defer func() { _, _ = c.conn.Exec(context.WithoutCancel(ctx), "rollback").ReadAll() }()
-	if _, err := c.conn.Exec(ctx, "begin read only; set local search_path = ''").ReadAll(); err != nil {
-		return nil, err
+	err := f()
+	if err != nil && c.conn.IsClosed() && ctx.Err() == nil {
+		if err = c.open(ctx); err == nil {
+			err = f()
+		}
 	}
-	res := c.conn.ExecParams(ctx, sql, params, nil, nil, nil).Read()
-	return res.Rows, res.Err
+	return err
 }
 
-// open connects, unless the connection's still alive. c.mu must be held.
+// open connects, unless it's connected already. c.mu must be held.
 func (c *Catalog) open(ctx context.Context) error {
 	if c.closed {
 		return ErrClosed
 	}
-	if c.conn == nil || !conn.Alive(ctx, c.conn) {
+	if c.conn == nil || c.conn.IsClosed() {
 		fresh, err := c.connect(ctx)
 		if err != nil {
 			return err

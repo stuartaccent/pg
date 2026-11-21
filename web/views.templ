@@ -19,6 +19,8 @@ templ Index(services []string, current string, readOnly bool, j jobView, err err
 			<meta charset="utf-8"/>
 			<title>pg</title>
 			<script src="/static/theme.js"></script>
+			<!-- Nothing here animates as it arrives, so swaps needn't wait htmx's 20ms to settle. -->
+			<meta name="htmx-config" content='{"defaultSettleDelay":0}'/>
 			<script src="/static/htmx.min.js"></script>
 			<script src="/static/app.js" defer></script>
 			<link rel="icon" href="/static/favicon.svg" type="image/svg+xml"/>
