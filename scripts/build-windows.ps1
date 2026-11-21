@@ -39,7 +39,7 @@ try {
 	$ldflags = "-s -w -H windowsgui -X main.version=$Version -extldflags=-static"
 	if ($Repository) { $ldflags += " -X main.repository=$Repository" }
 	$env:CGO_ENABLED = '1'
-	go build -trimpath -ldflags $ldflags -o dist\pg.exe .\cmd\pgide
+	go build -tags production -trimpath -ldflags $ldflags -o dist\pg.exe .\cmd\pgide
 	if ($LASTEXITCODE) { throw "go build failed" }
 } finally {
 	Remove-Item -ErrorAction SilentlyContinue $syso

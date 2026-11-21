@@ -13,7 +13,7 @@ ldflags="-X main.version=$version"
 if [ -n "${REPOSITORY:-}" ]; then # owner/name, where updates come from
 	ldflags="$ldflags -X main.repository=$REPOSITORY"
 fi
-go build -ldflags "$ldflags" -o "$app/Contents/MacOS/pg" ./cmd/pgide
+go build -tags production -ldflags "$ldflags" -o "$app/Contents/MacOS/pg" ./cmd/pgide
 
 iconset=$(mktemp -d)/icon.iconset
 mkdir "$iconset"

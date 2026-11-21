@@ -9,7 +9,8 @@ tasks:
   run:
     desc: Run the desktop app
     cmds:
-      - go run ./cmd/pgide
+      # private_mac_apis lets View > Open Developer Tools open the Web Inspector on macOS.
+      - go run -tags private_mac_apis ./cmd/pgide
 
   bundle:
     desc: Build dist/pg.app on macOS, or dist/pg.exe on Windows

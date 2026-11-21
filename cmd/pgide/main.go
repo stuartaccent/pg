@@ -123,6 +123,7 @@ func main() {
 			// Windows puts the menu in each window, and only if asked.
 			UseApplicationMenu: true,
 		})
+		enableDevTools(window)
 		// Closing the last window quits, and by the time that's asked the window
 		// has gone, so it has to be stopped here.
 		window.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) {
