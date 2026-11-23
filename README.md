@@ -85,7 +85,7 @@ The SQL editor is CodeMirror 6, bundled from `web/js/app.js` into `web/static/ap
 npm ci && npm run build && npm test
 ```
 
-Styling is daisyUI 5.8.2 (vendored as `web/css/daisyui.mjs`) on the Tailwind standalone CLI. `web/static/app.css` is generated, so edit `web/css/app.css` instead. The CLI isn't kept in the repo; `task tailwind` fetches the one for your system, or on Apple silicon, by hand:
+Styling is daisyUI 5.8.2 (vendored as `web/css/daisyui.mjs`) on the Tailwind standalone CLI. Before changing how results, tabs or dialogs are styled, see [docs/WEBKIT.md](docs/WEBKIT.md) for what's slow in WebKit. `web/static/app.css` is generated, so edit `web/css/app.css` instead. The CLI isn't kept in the repo; `task tailwind` fetches the one for your system, or on Apple silicon, by hand:
 
 ```sh
 mkdir -p tmp && curl -fsSLo tmp/tailwindcss https://github.com/tailwindlabs/tailwindcss/releases/download/v4.3.3/tailwindcss-macos-arm64 && chmod +x tmp/tailwindcss
