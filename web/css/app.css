@@ -9,6 +9,10 @@
    slightly smaller fields, tighter corners, no depth or noise. */
 @plugin "./daisyui.mjs" {
     themes: false;
+    /* Without the scroll lock, as the page never scrolls. It sets a variable on the
+       root while a dialog is open, which every element inherits, so it restyles
+       every result cell: half a second for thousands of rows. */
+    exclude: rootscrolllock, rootscrollgutter;
 }
 
 @plugin "./daisyui-theme.mjs" {
