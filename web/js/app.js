@@ -129,10 +129,37 @@ function mount(panel) {
 		],
 	});
 	views.set(panel.dataset.tab, view);
+	const height = localStorage.getItem(sizeVars.height);
+	if (height) textarea.form.style.setProperty(sizeVars.height, `${height}px`);
 	// Restored tabs open behind, so whatever was chosen meanwhile stays in front.
-	if (restoring) panel.hidden = true;
+	if (restoring) setBehind(panel, true);
 	else selectTab(panel.dataset.tab);
 }
+
+// Puts a query tab's panel behind, or back in front: app.css moves it off screen.
+function setBehind(panel, behind) {
+	const results = panel.querySelector("main");
+	if (behind) {
+		panel.setAttribute("aria-hidden", "true");
+		results.tabIndex = -1; // Chromium lets Tab reach anything that scrolls
+	} else {
+		panel.removeAttribute("aria-hidden");
+		results.removeAttribute("tabindex");
+	}
+}
+
+// Selecting all, or dragging past the results, would take in the rows of tabs
+// behind, so it stops at the panel showing.
+document.addEventListener("selectionchange", () => {
+	const selection = getSelection();
+	const behind = [...document.querySelectorAll("[data-tab][aria-hidden] > main")];
+	if (selection.isCollapsed || !behind.some((results) => selection.containsNode(results, true))) return;
+	const panel = document.querySelector("#panels > :not([hidden], [aria-hidden])");
+	const { startContainer, startOffset, endContainer, endOffset } = selection.getRangeAt(0);
+	const start = panel.contains(startContainer) ? [startContainer, startOffset] : [panel, 0];
+	const end = panel.contains(endContainer) ? [endContainer, endOffset] : [panel, panel.childNodes.length];
+	selection.setBaseAndExtent(...start, ...end);
+});
 
 // The server tools, which open as tabs of their own beside the query tabs.
 const tools = ["activity", "health", "backups", "history", "psql"];
@@ -143,7 +170,7 @@ function selectTab(id) {
 	const tool = tools.includes(id);
 	if (!tool) activeTab = id;
 	for (const panel of document.querySelectorAll("[data-tool-panel]")) panel.hidden = panel.id !== `${id}-panel`;
-	for (const panel of document.querySelectorAll("[data-tab]")) panel.hidden = tool || panel.dataset.tab !== id;
+	for (const panel of document.querySelectorAll("[data-tab]")) setBehind(panel, tool || panel.dataset.tab !== id);
 	for (const button of document.querySelectorAll("[data-tool-button]")) button.setAttribute("aria-pressed", button.dataset.toolButton === id);
 	for (const tab of document.querySelectorAll("[data-tab-button]")) {
 		const active = tab.dataset.tabButton === id;
@@ -151,6 +178,7 @@ function selectTab(id) {
 		tab.querySelector("[role=tab]")?.setAttribute("aria-selected", active);
 	}
 	if (!tool) views.get(id).focus();
+	else if (document.activeElement.closest("[data-tab]")) document.activeElement.blur(); // or keys still reach the editor
 }
 
 // The tool showing, if any, and whether a tool's tab is open at all.
@@ -716,8 +744,9 @@ function resetTree() {
 }
 
 // Drag bars, rather than CSS resize: WebKit's corner handle can't be relied on
-// with an editor filling the box. Each sizes the element just before it, by a
-// variable so that all the tabs' editors stay the same height.
+// with an editor filling the box. Each sizes the element just before it, and the
+// same one in every tab, so all the editors stay the same height. Set on those
+// rather than the root, as a variable there restyles every result cell.
 const sizeVars = { height: "--editor-height", width: "--sidebar-width" };
 
 function resize(bar, size) {
@@ -725,7 +754,9 @@ function resize(bar, size) {
 	const prop = bar.dataset.resize;
 	const room = prop === "height" ? box.parentElement.clientHeight : box.parentElement.clientWidth;
 	const px = Math.max(MIN_PANE, Math.min(size, room - 2 * MIN_PANE));
-	document.documentElement.style.setProperty(sizeVars[prop], `${px}px`);
+	for (const each of document.querySelectorAll(`[data-resize=${prop}]`)) {
+		each.previousElementSibling.style.setProperty(sizeVars[prop], `${px}px`);
+	}
 	localStorage.setItem(sizeVars[prop], px);
 }
 

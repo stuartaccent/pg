@@ -126,7 +126,7 @@ templ Index(services []string, current string, readOnly bool, j jobView, err err
 						<button type="button" class="btn btn-square btn-ghost btn-sm mx-1 self-center" aria-label="New query tab" title={ "New tab (" + shortcut("⌘T") + ")" } hx-post="/tabs" hx-target="#panels" hx-swap="beforeend"><i data-lucide="plus" class="size-4"></i></button>
 						<button type="button" class="btn btn-square btn-ghost btn-sm ml-auto mr-1 self-center" aria-label="Close all tabs" title="Close all tabs" onclick="closeAllTabs()"><i data-lucide="copy-x" class="size-4"></i></button>
 					</div>
-					<div id="panels" class="flex flex-1 min-h-0">
+					<div id="panels" class="relative flex flex-1 min-h-0">
 						@tabPanel("1")
 						<section id="activity-panel" data-tool-panel class="flex flex-1 min-w-0 min-h-0 flex-col" hidden>
 							<div class="flex h-10 shrink-0 items-center gap-3 border-b border-base-content/10 px-3 text-xs">
@@ -314,7 +314,7 @@ templ tabButtonOf(id, label, icon string) {
 // tabPanel is a tab's toolbar, editor and results. group/tab lets the toolbar
 // react while a query runs: htmx marks the Running… indicator htmx-request.
 templ tabPanel(id string) {
-	<section data-tab={ id } class="group/tab flex flex-col flex-1 min-w-0 min-h-0">
+	<section data-tab={ id } class="group/tab absolute inset-0 flex flex-col">
 		<!-- Outside the form on purpose: inside it, Stop would inherit
 		     hx-sync="this:replace" and abort the very request it is cancelling. -->
 		<div class="flex h-10 shrink-0 items-center gap-1 border-b border-base-content/10 px-2">

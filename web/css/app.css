@@ -97,6 +97,18 @@
     @apply max-w-[40ch] overflow-hidden text-ellipsis whitespace-nowrap;
 }
 
+/* Query tabs behind the one showing. Moved away rather than display: none, which
+   lays out every result cell again on the way back. What can take the focus
+   there is made invisible, but not the rows, as that restyles each one. */
+[data-tab][aria-hidden] {
+    transform: translateX(-200vw);
+}
+
+[data-tab][aria-hidden] > :not(main),
+[data-tab][aria-hidden] > main > :not(table) {
+    visibility: hidden;
+}
+
 /* Without this, WebKit takes seconds to repaint thousands of rows whenever
    anything around them changes. */
 main.results {

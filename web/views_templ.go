@@ -185,7 +185,7 @@ func Index(services []string, current string, readOnly bool, j jobView, err erro
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "\" hx-post=\"/tabs\" hx-target=\"#panels\" hx-swap=\"beforeend\"><i data-lucide=\"plus\" class=\"size-4\"></i></button> <button type=\"button\" class=\"btn btn-square btn-ghost btn-sm ml-auto mr-1 self-center\" aria-label=\"Close all tabs\" title=\"Close all tabs\" onclick=\"closeAllTabs()\"><i data-lucide=\"copy-x\" class=\"size-4\"></i></button></div><div id=\"panels\" class=\"flex flex-1 min-h-0\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "\" hx-post=\"/tabs\" hx-target=\"#panels\" hx-swap=\"beforeend\"><i data-lucide=\"plus\" class=\"size-4\"></i></button> <button type=\"button\" class=\"btn btn-square btn-ghost btn-sm ml-auto mr-1 self-center\" aria-label=\"Close all tabs\" title=\"Close all tabs\" onclick=\"closeAllTabs()\"><i data-lucide=\"copy-x\" class=\"size-4\"></i></button></div><div id=\"panels\" class=\"relative flex flex-1 min-h-0\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -607,7 +607,7 @@ func tabPanel(id string) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "\" class=\"group/tab flex flex-col flex-1 min-w-0 min-h-0\"><!-- Outside the form on purpose: inside it, Stop would inherit\n\t\t     hx-sync=\"this:replace\" and abort the very request it is cancelling. --><div class=\"flex h-10 shrink-0 items-center gap-1 border-b border-base-content/10 px-2\"><div class=\"join mr-1\"><button type=\"submit\" form=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "\" class=\"group/tab absolute inset-0 flex flex-col\"><!-- Outside the form on purpose: inside it, Stop would inherit\n\t\t     hx-sync=\"this:replace\" and abort the very request it is cancelling. --><div class=\"flex h-10 shrink-0 items-center gap-1 border-b border-base-content/10 px-2\"><div class=\"join mr-1\"><button type=\"submit\" form=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
