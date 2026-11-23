@@ -219,6 +219,42 @@ async function closeAllTabs() {
 	saveTabs();
 }
 
+// openDialog shows a dialog as a modal. Not showModal, which restyles everything
+// behind it: half a second for thousands of rows. The dialog's backdrop covers
+// the page, and the listeners below do the rest of what a modal does.
+function openDialog(dialog) {
+	// One at a time: without a top layer, a later one could open underneath.
+	for (const other of document.querySelectorAll("dialog[open]")) if (other !== dialog) other.close();
+	dialog.setAttribute("aria-modal", "true");
+	dialog.show();
+	// WebKit leaves the focus behind it.
+	controlsIn(dialog)[0].focus();
+}
+
+// The controls Tab moves between, leaving out hidden ones.
+const controlsIn = (dialog) => [...dialog.querySelectorAll(".modal-box :is(button, input, select, textarea):enabled")].filter((el) => el.getClientRects().length > 0);
+
+// Escape closes the open dialog, and Tab stays in it.
+document.addEventListener("keydown", (event) => {
+	const dialog = document.querySelector("dialog[open]");
+	if (!dialog || event.isComposing) return;
+	if (event.key === "Escape") {
+		event.preventDefault();
+		dialog.close();
+	} else if (event.key === "Tab") {
+		event.preventDefault();
+		const controls = controlsIn(dialog);
+		const at = controls.indexOf(document.activeElement);
+		controls.at(event.shiftKey ? Math.max(at, 0) - 1 : (at + 1) % controls.length).focus();
+	}
+});
+
+// Nothing behind an open dialog can take the focus, so nor can it take the keys.
+document.addEventListener("focusin", (event) => {
+	const dialog = document.querySelector("dialog[open]");
+	if (dialog && !dialog.contains(event.target)) controlsIn(dialog)[0].focus();
+});
+
 // ask shows the confirm dialog and resolves to whether the user continued.
 // Not confirm(), which webviews don't have to implement. Enter means Cancel
 // unless enterContinues: a held ⌘+Enter mustn't wave through a risky query.
@@ -226,7 +262,7 @@ function ask(message, enterContinues = false) {
 	const dialog = document.querySelector("#confirm");
 	document.querySelector("#confirm-text").textContent = message;
 	dialog.returnValue = "";
-	dialog.showModal();
+	openDialog(dialog);
 	if (enterContinues) dialog.querySelector("button[value=yes]").focus();
 	return new Promise((resolve) => {
 		dialog.addEventListener("close", () => resolve(dialog.returnValue === "yes"), { once: true });
@@ -256,7 +292,7 @@ function askParams(names) {
 	});
 	document.querySelector("#params-fields").replaceChildren(...labels.flat());
 	dialog.returnValue = "";
-	dialog.showModal();
+	openDialog(dialog);
 	inputs[0].select();
 	return new Promise((resolve) => {
 		dialog.addEventListener(
@@ -338,13 +374,6 @@ function formatSQL() {
 	} catch (error) {
 		notice.textContent = `Could not format: ${error.message}`;
 	}
-}
-
-// Opens a dialog with nothing focused. Left alone, the browser focuses its first
-// link or button, and draws a focus ring round it that looks like a selection.
-function showUnfocused(dialog) {
-	dialog.showModal();
-	document.activeElement.blur();
 }
 
 // Each tool opens its tab, or goes to it, and refreshes it now. Given a class
@@ -502,7 +531,7 @@ function showSaveQuery(name, text) {
 	document.querySelector("#save-name").value = name;
 	document.querySelector("#save-text").value = text;
 	document.querySelector("#save-status").replaceChildren();
-	document.querySelector("#save-query").showModal();
+	openDialog(document.querySelector("#save-query"));
 }
 
 document.addEventListener("query-saved", () => {
@@ -524,7 +553,7 @@ function showRestore(button) {
 	document.querySelector("#restore-service").textContent = service;
 	document.querySelector("#restore-file").value = file;
 	document.querySelector("#restore-name").value = name;
-	document.querySelector("#restore").showModal();
+	openDialog(document.querySelector("#restore"));
 }
 
 function showReplace(button) {
@@ -535,7 +564,7 @@ function showReplace(button) {
 	document.querySelector("#replace-other").hidden = other !== "true";
 	document.querySelector("#replace-confirm").value = "";
 	checkReplace();
-	document.querySelector("#replace").showModal();
+	openDialog(document.querySelector("#replace"));
 }
 
 function checkReplace() {
@@ -578,7 +607,10 @@ function showCell(td) {
 	// Only a column straight from a table can be updated.
 	const fromTable = Boolean(headerOf(td).dataset.table);
 	for (const button of document.querySelectorAll("#cell [data-update]")) button.hidden = !fromTable;
-	showUnfocused(document.querySelector("#cell"));
+	// Focuses the dialog, as a button's focus ring looks like a selection.
+	const cell = document.querySelector("#cell");
+	openDialog(cell);
+	cell.focus();
 }
 
 const headerOf = (td) => td.closest("table").tHead.rows[0].cells[td.cellIndex];

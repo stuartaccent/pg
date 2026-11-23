@@ -97,6 +97,12 @@
     @apply max-w-[40ch] overflow-hidden text-ellipsis whitespace-nowrap;
 }
 
+/* Without this, WebKit takes seconds to repaint thousands of rows whenever
+   anything around them changes. */
+main.results {
+    isolation: isolate;
+}
+
 .results tr[data-row] td {
     @apply cursor-pointer hover:bg-base-200;
 }
