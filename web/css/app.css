@@ -107,6 +107,38 @@ main.results {
     @apply cursor-pointer hover:bg-base-200;
 }
 
+.results tr[data-row][aria-current] {
+    @apply bg-primary/10;
+}
+
+/* Row numbers. Not a real column, which would shift the cells app.js looks up
+   by index. */
+main.results tbody {
+    counter-reset: row;
+}
+
+main.results :is(thead, tbody) tr::before {
+    content: "";
+    @apply table-cell w-px border-r border-base-content/5 bg-base-200;
+}
+
+main.results tr[data-row] {
+    counter-increment: row;
+}
+
+main.results tr[data-row]::before {
+    content: counter(row);
+    @apply cursor-pointer px-2 text-right align-middle tabular-nums text-base-content/60;
+}
+
+/* Only the chosen row's number stays put when scrolling sideways: thousands of
+   sticky cells make WebKit drop frames. Mixed rather than see-through, as cells
+   scroll behind it. */
+main.results tr[data-row][aria-current]::before {
+    @apply sticky left-0;
+    background-color: color-mix(in oklab, var(--color-primary) 20%, var(--color-base-200));
+}
+
 /* The last tab stays open: there's nowhere to go without one. Hidden rather
    than removed, so the tab keeps its width. */
 #tabs:has(> :only-child) .tab-close {

@@ -776,8 +776,13 @@ window.webkit?.messageHandlers?.external?.postMessage("wails:runtime:ready");
 window.chrome?.webview?.postMessage("wails:runtime:ready");
 
 document.addEventListener("click", (event) => {
-	const td = event.target.closest?.(".results tr[data-row] td");
-	if (td && !event.target.closest("button") && getSelection().isCollapsed) showCell(td);
+	const tr = event.target.closest?.(".results tr[data-row]");
+	if (!tr || event.target.closest("button") || !getSelection().isCollapsed) return;
+	for (const row of tr.closest("table").querySelectorAll("tr[aria-current]")) row.removeAttribute("aria-current");
+	tr.setAttribute("aria-current", "true");
+	// The row's number isn't in a cell, so clicking it only marks the row.
+	const td = event.target.closest("td");
+	if (td) showCell(td);
 });
 
 // The values given for each tab's :names, for htmx:configRequest to use. Export
