@@ -151,6 +151,14 @@ main.results tr[data-row][aria-current]::before {
     background-color: color-mix(in oklab, var(--color-primary) 20%, var(--color-base-200));
 }
 
+/* The spinner's mask is an animated image, which WebKit runs from the start in
+   every tab, though htmx hides it. Hidden rather than display: none, so Running…
+   doesn't move as it fades. */
+.htmx-indicator:not(.htmx-request) .loading {
+    visibility: hidden;
+    mask-image: none;
+}
+
 /* The last tab stays open: there's nowhere to go without one. Hidden rather
    than removed, so the tab keeps its width. */
 #tabs:has(> :only-child) .tab-close {

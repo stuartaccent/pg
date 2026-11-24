@@ -24,6 +24,8 @@ Anything that restyles or lays out every result cell takes about half a second a
 | Switching tabs | 0.7 s | 0.07 s | `display: none` | move tabs behind off screen (`setBehind`) |
 | Scrolling, per frame | 25 ms | 17 ms | a sticky cell in every row | pin only the highlighted row's number |
 
+An idle window also used about 4% of a CPU until a query had run, as the hidden Running… spinner's mask is an animated image. Without the mask while nothing runs, it's under 1%. A focused editor's blinking cursor adds about 1–2%, so blur it when measuring.
+
 The 6–7 s repaint was there before row numbers were added. It didn't show in a test page with only the table in it: **time the real page**.
 
 We know `isolate` stops the repaint, but not exactly why WebKit repaints without it. `contain: paint`, `contain: layout paint` and `contain: strict` worked as well. `isolate` is the smallest.
@@ -52,9 +54,14 @@ We know `isolate` stops the repaint, but not exactly why WebKit repaints without
 - **Typing, about 40 ms a key against 19 ms with no results:** removing `:has()` rules made no difference, and removing position rules such as `:first-child` didn't make the frame any quicker.
 - **Several huge tabs at once:** each stays laid out. With two, switching between them took 160 ms, opening or closing a cell 146 ms and typing 53 ms a key. More than two hasn't been timed.
 - **Drawing only the rows on screen:** the real fix if results get much bigger. Hiding all but 500 rows took dialogs to 0.2 s and resizing to 0.1 s, before the fixes above. It's a big change: column widths, Copy row and row numbers rely on every row being there.
+- **Loading a page of 500 rows:** 155 ms for the second, rising to about 200 ms for the sixth.
+- **Running a query, about 31 ms** to turn Stop red and show Running…. Taking the `:has()` out of Stop's class made it 30 ms.
+- **A dialog's fade:** one frame of about 30 ms as it opens, then 60 fps.
+- **The read-only badge:** `body:has()` costs 8 ms of script as it comes or goes, and the frame stayed at 17 ms.
 
 ## Didn't help
 
+- `visibility: hidden` alone on the idle spinner: htmx already sets it, and the image still runs.
 - `content-visibility: hidden` on a hidden tab's results: 660 ms, against 700 ms for `display: none`.
 - `table-layout: fixed`, for resizing once the sizes were off the root.
 - `overflow: clip` on cells.
